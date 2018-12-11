@@ -76,7 +76,7 @@ class ASTWrapper(object):
     # pylint: disable=too-few-public-methods
 
     def __init__(self, ast_def, root_type=None):
-        # type: (asdl.Module, str, Dict[str, util.IndexedSet]) -> None
+        # type: (asdl.Module, str) -> None
         self.ast_def = ast_def
         self._root_type = root_type
 
