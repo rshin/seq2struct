@@ -1,4 +1,6 @@
+import collections
 import collections.abc
+import json
 
 
 class Sentinel(object):
@@ -21,9 +23,9 @@ class Sentinel(object):
         return True
 
 
-UNK = Sentinel('UNK')
-BOS = Sentinel('BOS')
-EOS = Sentinel('EOS')
+UNK = '<UNK>'
+BOS = '<BOS>'
+EOS = '<EOS>'
 
 
 class Vocab(collections.abc.Set):
@@ -31,10 +33,8 @@ class Vocab(collections.abc.Set):
     def __init__(self, iterable, special_elems=(UNK, BOS, EOS)):
         # type: (Iterable[T]) -> None
         elements = list(special_elems)
-
-        iterable_list = list(iterable)
-        assert len(iterable_list) == len(set(iterable_list))
-        elements.extend(iterable_list)
+        elements.extend(iterable)
+        assert len(elements) == len(set(elements))
 
         self.id_to_elem = {i: elem for i, elem in enumerate(elements)}
         self.elem_to_id = {elem: i for i, elem in enumerate(elements)}
@@ -72,3 +72,32 @@ class Vocab(collections.abc.Set):
     def __hash__(self):
         # type: () -> int
         return id(self)
+    
+    @classmethod
+    def load(self, in_path):
+        return Vocab(json.load(open(in_path)), special_elems=())
+
+    def save(self, out_path):
+        with open(out_path, 'w') as f:
+            json.dump([self.id_to_elem[i] for i in range(len(self.id_to_elem))],  f)
+
+
+class VocabBuilder:
+    def __init__(self, min_freq=None, max_count=None):
+        self.word_freq = collections.Counter()
+        self.min_freq = min_freq
+        self.max_count = max_count
+    
+    def add_word(self, word):
+        self.word_freq[word] += 1
+    
+    def finish(self):
+        # Select the `max_count` most frequent words. If `max_count` is None, then choose all of the words.
+        eligible_words_and_freqs = self.word_freq.most_common(self.max_count)
+        if self.min_freq is not None:
+            for i, (word, freq) in enumerate(eligible_words_and_freqs):
+                if freq < self.min_freq:
+                    eligible_words_and_freqs = eligible_words_and_freqs[:i]
+                    break
+        
+        return Vocab(word for word, freq in eligible_words_and_freqs)

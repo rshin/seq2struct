@@ -195,10 +195,33 @@ def verify_ast(ast_def, node, expected_type=None, field_path=()):
             check(item)
 
 
+PYTHON_AST_FIELD_BLACKLIST = {
+    'Attribute': {'ctx'},
+    'Subscript': {'ctx'},
+    'Starred': {'ctx'},
+    'Name': {'ctx'},
+    'List': {'ctx'},
+    'Tuple': {'ctx'},
+}
+
+
+BUILTIN_TYPE_TO_PYTHON_TYPES = {
+    'identifier': (str,),
+    'int': (int,),
+    'string': (str,),
+    'bytes': (bytes,),
+    'object': (int, float),
+    'singleton': (bool, type(None))
+}
+
+
 def convert_native_ast(node):
     # type: (ast.AST) -> Dict[str, Any]
-    result = {'_type': node.__class__.__name__}  # type: Dict[str, Any]
+    node_type = node.__class__.__name__
+    result = {'_type': node_type}  # type: Dict[str, Any]
     for field, value in ast.iter_fields(node):
+        if field in PYTHON_AST_FIELD_BLACKLIST.get(node_type, set()):
+            continue
         if isinstance(value, (list, tuple)):
             result[field] = [convert_native_ast(v) for v in value]
         elif not isinstance(value, ast.AST):
