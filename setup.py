@@ -9,7 +9,7 @@ setup(
     install_requires=[
         'asdl~=0.1.5',
         'astor~=0.7.1',
-        'attr~=0.3.1',
+        'attrs~=18.2.0',
         'cython~=0.29.1',
         'jsonnet~=0.11.2',
         'nltk~=3.4',
