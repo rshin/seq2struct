@@ -1,4 +1,6 @@
 import ast
+import collections
+import collections.abc
 import itertools
 import json
 import os
@@ -53,6 +55,22 @@ def maybe_stack(items, dim=None):
     else:
         return torch.stack(to_stack, dim)
 
+
+def to_dict_with_sorted_values(d):
+    return {k: sorted(v) for k, v in d.items()}
+
+
+def to_dict_with_set_values(d):
+    result = {}
+    for k, v in d.items():
+        hashable_v = []
+        for v_elem in v:
+            if isinstance(v_elem, list):
+                hashable_v.append(tuple(v_elem))
+            else:
+                hashable_v.append(v_elem)
+        result[k] = set(hashable_v)
+    return result
 
 @attr.s
 class NL2CodeEncoderState:
@@ -171,6 +189,7 @@ class NL2CodeDecoder(torch.nn.Module):
                 save_path,
                 min_freq=3,
                 max_count=5000):
+            # TODO: don't hardcode Python.asdl
             self.ast_wrapper = ast_util.ASTWrapper(
                     asdl.parse(
                         os.path.join(
@@ -179,11 +198,16 @@ class NL2CodeDecoder(torch.nn.Module):
                             'Python.asdl')))
 
             self.vocab_path = os.path.join(save_path, 'dec_vocab.json')
+            self.observed_productions_path = os.path.join(save_path, 'observed_productions.json')
             self.data_dir = os.path.join(save_path, 'dec')
 
             self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
             # TODO: Write 'train', 'val', 'test' somewhere else
             self.items = {'train': [], 'val': [], 'test': []}
+            self.sum_type_constructors = collections.defaultdict(set)
+            self.field_presence_infos = collections.defaultdict(set)
+            self.seq_lengths = collections.defaultdict(set)
+            self.primitive_types = set()
 
             self.vocab = None
         
@@ -200,6 +224,8 @@ class NL2CodeDecoder(torch.nn.Module):
             if section == 'train':
                 for token in self._all_tokens(root):
                     self.vocab_builder.add_word(token)
+                self._record_productions(root)
+
             self.items[section].append(
                 NL2CodeDecoderPreprocItem(
                     tree=root,
@@ -214,14 +240,72 @@ class NL2CodeDecoder(torch.nn.Module):
                 with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
                     for item in items:
                         f.write(json.dumps(attr.asdict(item)) + '\n')
+            
+            # observed_productions
+            with open(self.observed_productions_path, 'w') as f:
+                json.dump({
+                    'sum_type_constructors': to_dict_with_sorted_values(self.sum_type_constructors),
+                    'field_presence_infos': to_dict_with_sorted_values(self.field_presence_infos),
+                    'seq_lengths': to_dict_with_sorted_values(self.seq_lengths),
+                    'primitive_types': sorted(self.primitive_types),
+                }, f, indent=2, sort_keys=True)
         
         def load(self):
             self.vocab = vocab.Vocab.load(self.vocab_path)
+            observed_productions = json.load(open(self.observed_productions_path))
+            self.sum_type_constructors = to_dict_with_set_values(observed_productions['sum_type_constructors'])
+            self.field_presence_infos = to_dict_with_set_values(observed_productions['field_presence_infos'])
+            self.seq_lengths = to_dict_with_set_values(observed_productions['seq_lengths'])
+            self.primitive_types = set(observed_productions['primitive_types'])
 
         def dataset(self, section):
             return [
                 NL2CodeDecoderPreprocItem(**json.loads(line))
                 for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+        
+        def _record_productions(self, tree):
+            queue = [tree]
+            while queue:
+                node = queue.pop()
+                node_type = node['_type']
+
+                # Rules of the form:
+                # expr -> Attribute | Await | BinOp | BoolOp | ...
+                if node_type in self.ast_wrapper.constructors:
+                    constructor = self.ast_wrapper.constructor_to_sum_type[node_type]
+                    self.sum_type_constructors[constructor].add(node_type)
+
+                # Rules of the form:
+                # FunctionDef
+                # -> identifier name, arguments args
+                # |  identifier name, arguments args, stmt* body
+                # |  identifier name, arguments args, expr* decorator_list
+                # |  identifier name, arguments args, expr? returns
+                # ...
+                # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
+                assert node_type in self.ast_wrapper.singular_types
+                field_presence_info = get_field_presence_info(
+                        node,
+                        self.ast_wrapper.singular_types[node_type].fields)
+                self.field_presence_infos[node_type].add(field_presence_info)
+
+                # Rules of the form:
+                # stmt* -> stmt
+                #        | stmt stmt
+                #        | stmt stmt stmt
+                for field_info in self.ast_wrapper.singular_types[node_type].fields:
+                    field_value = node.get(field_info.name)
+                    to_enqueue = []
+                    if field_info.seq:
+                        self.seq_lengths[field_info.type + '*'].add(len(field_value))
+                        to_enqueue = field_value
+                    else:
+                        to_enqueue = [field_value]
+                    for child in to_enqueue:
+                        if isinstance(child, collections.abc.Mapping) and '_type' in child:
+                            queue.append(child)
+                        else:
+                            self.primitive_types.add(type(child).__name__)
 
         def _all_tokens(self, root):
             queue = [root]
@@ -270,15 +354,14 @@ class NL2CodeDecoder(torch.nn.Module):
         self.enc_recurrent_size = enc_recurrent_size
         self.recurrent_size = recurrent_size
 
-        self.all_rules, self.rules_mask, all_seq_types = self._calculate_rules(
-                max_seq_length, self.ast_wrapper)
+        self.all_rules, self.rules_mask = self._calculate_rules(self.preproc)
         self.rules_index = {v: idx for idx, v in enumerate(self.all_rules)}
 
         self.node_type_vocab = vocab.Vocab(
-                ['bytes', 'str', 'int', 'float', 'bool', 'NoneType'] +
-                list(self.ast_wrapper.sum_types.keys()) +
-                list(self.ast_wrapper.singular_types.keys()) +
-                list(seq_type + '*' for seq_type in all_seq_types),
+                sorted(self.preproc.primitive_types) +
+                sorted(self.ast_wrapper.sum_types.keys()) +
+                sorted(self.ast_wrapper.singular_types.keys()) +
+                sorted(self.preproc.seq_lengths.keys()),
                 special_elems=())
 
         self.state_update = torch.nn.LSTM(
@@ -329,7 +412,7 @@ class NL2CodeDecoder(torch.nn.Module):
         self.xent_loss = torch.nn.CrossEntropyLoss(reduction='none')
 
     @classmethod
-    def _calculate_rules(cls, max_seq_length, ast_wrapper):
+    def _calculate_rules(cls, preproc):
         offset = 0
 
         all_rules = []
@@ -337,7 +420,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
         # Rules of the form:
         # expr -> Attribute | Await | BinOp | BoolOp | ...
-        for parent, children in ast_wrapper.sum_type_vocabs.items():
+        for parent, children in sorted(preproc.sum_type_constructors.items()):
             rules_mask[parent] = (offset, offset + len(children))
             offset += len(children)
             all_rules += [(parent, child) for child in children]
@@ -350,43 +433,21 @@ class NL2CodeDecoder(torch.nn.Module):
         # |  identifier name, arguments args, expr? returns
         # ...
         # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
-        all_node_types = set()
-        all_seq_types = set()
-        for name, info in ast_wrapper.singular_types.items():
-            field_presence_types = []
-            for field in info.fields:
-                maybe_missing = field.opt or field.seq
-                is_builtin_type = field.type in asdl.builtin_types
-
-                if maybe_missing and is_builtin_type:
-                    field_presence_types.append(
-                        ast_util.BUILTIN_TYPE_TO_PYTHON_TYPES[field.type] + (False,))
-                elif maybe_missing and not is_builtin_type:
-                    field_presence_types.append((True, False))
-                elif not maybe_missing and is_builtin_type:
-                    field_presence_types.append(ast_util.BUILTIN_TYPE_TO_PYTHON_TYPES[field.type])
-                elif not maybe_missing and not is_builtin_type:
-                    field_presence_types.append((True,))
-            presence_prod = list(itertools.product(*field_presence_types))
-            rules_mask[name] = (offset, offset + len(presence_prod))
-            offset += len(presence_prod)
-            all_rules += [(name, presence) for presence in presence_prod]
-
-            for field in info.fields:
-                if field.seq:
-                    all_seq_types.add(field.type)
+        for name, field_presence_infos in sorted(preproc.field_presence_infos.items()):
+            rules_mask[name] = (offset, offset + len(field_presence_infos))
+            offset += len(field_presence_infos)
+            all_rules += [(name, presence) for presence in field_presence_infos]
 
         # Rules of the form:
         # stmt* -> stmt
         #        | stmt stmt
         #        | stmt stmt stmt
-        for seq_type in sorted(all_seq_types):
-            seq_type_name = seq_type + '*'
-            rules_mask[seq_type_name] = (offset, offset + max_seq_length)
-            offset += max_seq_length
-            all_rules += [(seq_type_name, i) for i in range(1, max_seq_length + 1)]
+        for seq_type_name, lengths in sorted(preproc.seq_lengths.items()):
+            rules_mask[seq_type_name] = (offset, offset + len(lengths))
+            offset += len(lengths)
+            all_rules += [(seq_type_name, i) for i in lengths]
 
-        return all_rules, rules_mask, all_seq_types
+        return all_rules, rules_mask
 
     def compute_loss(self, example, desc_enc):
         # - field is required, singular, sum type
@@ -489,25 +550,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
             # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
             # Figure out which rule needs to be applied
-            present = []
-            for field_info in type_info.fields:
-                field_value = node.get(field_info.name)
-                is_present = field_value is not None and field_value != []
-
-                maybe_missing = field_info.opt or field_info.seq
-                is_builtin_type = field_info.type in asdl.builtin_types
-
-                if maybe_missing and is_builtin_type:
-                    # TODO: make it posible to deal with "singleton?"
-                    present.append(is_present and type(field_value))
-                elif maybe_missing and not is_builtin_type:
-                    present.append(is_present)
-                elif not maybe_missing and is_builtin_type:
-                    present.append(type(field_value))
-                elif not maybe_missing and not is_builtin_type:
-                    assert is_present
-                    present.append(True)
-
+            present = get_field_presence_info(node, type_info.fields)
             # TODO: put type name in type_info for product types
             rule = (node['_type'], tuple(present))
             output, state, prev_action_emb, loss_piece = self.apply_rule(
@@ -667,3 +710,24 @@ class NL2CodeDecoder(torch.nn.Module):
             dim=1)
 
         return new_state, action_emb, loss_piece
+
+def get_field_presence_info(node, field_infos):
+    present = []
+    for field_info in field_infos:
+        field_value = node.get(field_info.name)
+        is_present = field_value is not None and field_value != []
+
+        maybe_missing = field_info.opt or field_info.seq
+        is_builtin_type = field_info.type in asdl.builtin_types
+
+        if maybe_missing and is_builtin_type:
+            # TODO: make it posible to deal with "singleton?"
+            present.append(is_present and type(field_value).__name__)
+        elif maybe_missing and not is_builtin_type:
+            present.append(is_present)
+        elif not maybe_missing and is_builtin_type:
+            present.append(type(field_value).__name__)
+        elif not maybe_missing and not is_builtin_type:
+            assert is_present
+            present.append(True)
+    return tuple(present)

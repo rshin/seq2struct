@@ -98,6 +98,11 @@ class ASTWrapper(object):
             name: sorted(t.name for t in sum_type.types)
             for name, sum_type in self.sum_types.items()
         }
+        self.constructor_to_sum_type = {
+            constructor.name: name
+            for name, sum_type in self.sum_types.items()
+            for constructor in sum_type.types
+        }
         self.fieldless_constructors = sorted(
             visitor.fieldless_constructors.keys())
         self.optional_fields = sorted(visitor.optional_fields)
