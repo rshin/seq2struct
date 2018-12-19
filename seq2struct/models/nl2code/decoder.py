@@ -463,7 +463,8 @@ class NL2CodeDecoder(torch.nn.Module):
                 # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
                 # - at decoding time, cast back to str/int/float/bool
                 field_type = type(node).__name__
-                field_value_split = self.preproc._tokenize_field_value(node)
+                field_value_split = self.preproc._tokenize_field_value(node) + [
+                        vocab.EOS]
 
                 for token in field_value_split:
                     state, prev_action_emb, loss_piece = self.gen_token(
@@ -519,20 +520,21 @@ class NL2CodeDecoder(torch.nn.Module):
                 parent_action_emb = prev_action_emb
                 loss.append(loss_piece)
 
-            # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
-            # Figure out which rule needs to be applied
-            present = get_field_presence_info(node, type_info.fields)
-            # TODO: put type name in type_info for product types
-            rule = (node['_type'], tuple(present))
-            output, state, prev_action_emb, loss_piece = self.apply_rule(
-                    node['_type'],
-                    rule,
-                    state,
-                    prev_action_emb,
-                    parent_h,
-                    parent_action_emb,
-                    desc_enc)
-            loss.append(loss_piece)
+            if type_info.fields:
+                # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
+                # Figure out which rule needs to be applied
+                present = get_field_presence_info(node, type_info.fields)
+                # TODO: put type name in type_info for product types
+                rule = (node['_type'], tuple(present))
+                output, state, prev_action_emb, loss_piece = self.apply_rule(
+                        node['_type'],
+                        rule,
+                        state,
+                        prev_action_emb,
+                        parent_h,
+                        parent_action_emb,
+                        desc_enc)
+                loss.append(loss_piece)
 
             # reversed so that we perform a DFS in left-to-right order
             for field_info in reversed(type_info.fields):

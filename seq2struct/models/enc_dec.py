@@ -73,4 +73,5 @@ class EncDecModel(torch.nn.Module):
     def eval_on_batch(self, batch):
         mean_loss = self.compute_loss(batch).item()
         batch_size = len(batch)
-        return {'loss': mean_loss * batch_size, 'total': batch_size}
+        result = {'loss': mean_loss * batch_size, 'total': batch_size}
+        return result
