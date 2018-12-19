@@ -1,7 +1,6 @@
 import ast
 import collections
 import collections.abc
-import itertools
 import json
 import os
 import re
@@ -9,24 +8,13 @@ import re
 import asdl
 import attr
 import torch
-import torch.utils.data
 
 from seq2struct import ast_util
 from seq2struct import models
-from seq2struct.cobatch import torch_batcher
 from seq2struct.models import abstract_preproc
 from seq2struct.models import attention
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
-
-
-@attr.s
-class TreeState:
-    node = attr.ib()
-    parent_action_emb = attr.ib()
-    parent_h = attr.ib()
-    parent_field_type = attr.ib()
-    debug_path = attr.ib()
 
 
 def lstm_init(device, num_layers, hidden_size, *batch_sizes):
@@ -80,108 +68,6 @@ def tuplify(x):
 
 
 @attr.s
-class NL2CodeEncoderState:
-    state = attr.ib()
-    memory = attr.ib()
-    words = attr.ib()
-
-    def find_word_occurrences(self, word):
-        return [i for i, w in enumerate(self.words) if w == word]
-
-
-@registry.register('encoder', 'NL2Code')
-class NL2CodeEncoder(torch.nn.Module):
-    class Preproc(abstract_preproc.AbstractPreproc):
-        def __init__(
-                self,
-                save_path,
-                min_freq=3,
-                max_count=5000):
-            self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
-            self.data_dir = os.path.join(save_path, 'enc')
-
-            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
-            # TODO: Write 'train', 'val', 'test' somewhere else
-            self.texts = {'train': [], 'val': [], 'test': []}
-
-            self.vocab = None
-
-        def validate_item(self, item, section):
-            return True, None
-        
-        def add_item(self, item, section, validation_info):
-            if section == 'train':
-                for token in item.text:
-                    self.vocab_builder.add_word(token)
-            self.texts[section].append(item.text)
-
-        def save(self):
-            os.makedirs(self.data_dir, exist_ok=True)
-            self.vocab = self.vocab_builder.finish()
-            self.vocab.save(self.vocab_path)
-
-            for section, texts in self.texts.items():
-                with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
-                    for text in texts:
-                        f.write(json.dumps(text) + '\n')
-
-        def load(self):
-            self.vocab = vocab.Vocab.load(self.vocab_path)
-
-        def dataset(self, section):
-            return [
-                json.loads(line)
-                for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
-
-    def __init__(
-            self,
-            device,
-            preproc,
-            word_emb_size=128,
-            recurrent_size=256):
-        super().__init__()
-        self._device = device
-        self.desc_vocab = preproc.vocab
-
-        self.word_emb_size = word_emb_size
-        self.recurrent_size = recurrent_size
-        assert self.recurrent_size % 2 == 0
-
-        self.desc_embedding = torch.nn.Embedding(
-                num_embeddings=len(self.desc_vocab),
-                embedding_dim=self.word_emb_size)
-        self.encoder = torch.nn.LSTM(
-                input_size=self.word_emb_size,
-                hidden_size=self.recurrent_size // 2,
-                num_layers=1,
-                batch_first=True,
-                bidirectional=True)
-
-    def forward(self, desc_words):
-        # desc_indices shape: batch (=1) x desc length
-        desc_indices = torch.tensor(
-                self.desc_vocab.indices(desc_words),
-                device=self._device).unsqueeze(0)
-        # desc_emb shape: batch (=1) x desc length x word_emb_size
-        desc_emb = self.desc_embedding(desc_indices)
-
-        # outputs shape: batch (=1) x desc length x recurrent_size
-        # state shape:
-        # - h: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
-        # - c: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
-        outputs, state = self.encoder(desc_emb)
-
-        return NL2CodeEncoderState(
-            state=state,
-            memory=outputs,
-            words=desc_words)
-    
-    @classmethod
-    def all_tokens(self, desc_words):
-        return desc_words
-
-
-@attr.s
 class NL2CodeDecoderPreprocItem:
     tree = attr.ib()
     orig_code = attr.ib()
@@ -198,7 +84,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
                 asdl.parse(
                     os.path.join(
                         os.path.dirname(os.path.abspath(__file__)),
-                        '..',
+                        '..', '..',
                         'Python.asdl')))
 
         self.vocab_path = os.path.join(save_path, 'dec_vocab.json')
@@ -397,6 +283,15 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         else:
             field_value = str(field_value)
         return split_string_whitespace_and_camelcase(field_value)
+
+
+@attr.s
+class TreeState:
+    node = attr.ib()
+    parent_action_emb = attr.ib()
+    parent_h = attr.ib()
+    parent_field_type = attr.ib()
+    debug_path = attr.ib()
 
 
 @registry.register('decoder', 'NL2Code')
@@ -717,7 +612,7 @@ class NL2CodeDecoder(torch.nn.Module):
             prev_action_emb,
             parent_h,
             parent_action_emb,
-            desc_enc: NL2CodeEncoderState):
+            desc_enc):
         # desc_context shape: batch (=1) x emb_size
         desc_context, _ = self._desc_attention(prev_state, desc_enc)
         # node_type_emb shape: batch (=1) x emb_size
