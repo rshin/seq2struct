@@ -28,6 +28,8 @@ class EncDecModel(torch.nn.Module):
                 decoder,
                 encoder_preproc,
                 decoder_preproc):
+            super().__init__()
+
             self.enc_preproc = registry.lookup('encoder', encoder['name']).Preproc(**encoder_preproc)
             self.dec_preproc = registry.lookup('decoder', decoder['name']).Preproc(**decoder_preproc)
         
@@ -67,3 +69,8 @@ class EncDecModel(torch.nn.Module):
             loss = self.decoder.compute_loss(dec_output, enc_state)
             losses.append(loss)
         return torch.mean(torch.stack(losses, dim=0), dim=0)
+
+    def eval_on_batch(self, batch):
+        mean_loss = self.compute_loss(batch).item()
+        batch_size = len(batch)
+        return {'loss': mean_loss * batch_size, 'total': batch_size}

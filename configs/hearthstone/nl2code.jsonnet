@@ -29,11 +29,15 @@
 
     train: {
         batch_size: 10,
+        eval_batch_size: self.batch_size,
+
         keep_every_n: 100,
         eval_every_n: 100,
         save_every_n: 100,
-        report_every_n: 1,
+        report_every_n: 10,
+
         max_steps: 2650,
+        num_eval_items: 66,
     },
     optimizer: {
         name: 'adadelta',
