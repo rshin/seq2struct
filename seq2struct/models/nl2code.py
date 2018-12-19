@@ -72,6 +72,13 @@ def to_dict_with_set_values(d):
         result[k] = set(hashable_v)
     return result
 
+
+def tuplify(x):
+    if not isinstance(x, (tuple, list)):
+        return x
+    return tuple(tuplify(elem) for elem in x)
+
+
 @attr.s
 class NL2CodeEncoderState:
     state = attr.ib()
@@ -180,155 +187,222 @@ class NL2CodeDecoderPreprocItem:
     orig_code = attr.ib()
 
 
+class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
+    def __init__(
+            self,
+            save_path,
+            min_freq=3,
+            max_count=5000):
+        # TODO: don't hardcode Python.asdl
+        self.ast_wrapper = ast_util.ASTWrapper(
+                asdl.parse(
+                    os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        '..',
+                        'Python.asdl')))
+
+        self.vocab_path = os.path.join(save_path, 'dec_vocab.json')
+        self.observed_productions_path = os.path.join(save_path, 'observed_productions.json')
+        self.grammar_rules_path = os.path.join(save_path, 'grammar_rules.json')
+        self.data_dir = os.path.join(save_path, 'dec')
+
+        self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+        # TODO: Write 'train', 'val', 'test' somewhere else
+        self.items = {'train': [], 'val': [], 'test': []}
+        self.sum_type_constructors = collections.defaultdict(set)
+        self.field_presence_infos = collections.defaultdict(set)
+        self.seq_lengths = collections.defaultdict(set)
+        self.primitive_types = set()
+
+        self.vocab = None
+        self.all_rules = None
+        self.rules_mask = None
+
+    def validate_item(self, item, section):
+        try:
+            py_ast = ast.parse(item.code)
+            root = ast_util.convert_native_ast(py_ast)
+        except SyntaxError:
+            return section != 'train', None
+        return True, root
+
+    def add_item(self, item, section, validation_info):
+        root = validation_info
+        if section == 'train':
+            for token in self._all_tokens(root):
+                self.vocab_builder.add_word(token)
+            self._record_productions(root)
+
+        self.items[section].append(
+            NL2CodeDecoderPreprocItem(
+                tree=root,
+                orig_code=item.code))
+
+    def save(self):
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.vocab = self.vocab_builder.finish()
+        self.vocab.save(self.vocab_path)
+
+        for section, items in self.items.items():
+            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+                for item in items:
+                    f.write(json.dumps(attr.asdict(item)) + '\n')
+
+        # observed_productions
+        self.sum_type_constructors = to_dict_with_sorted_values(
+            self.sum_type_constructors)
+        self.field_presence_infos = to_dict_with_sorted_values(
+            self.field_presence_infos)
+        self.seq_lengths = to_dict_with_sorted_values(
+            self.seq_lengths)
+        self.primitive_types = sorted(self.primitive_types)
+        with open(self.observed_productions_path, 'w') as f:
+            json.dump({
+                'sum_type_constructors': self.sum_type_constructors,
+                'field_presence_infos': self.field_presence_infos,
+                'seq_lengths': self.seq_lengths,
+                'primitive_types': self.primitive_types,
+            }, f, indent=2, sort_keys=True)
+
+        # grammar
+        self.all_rules, self.rules_mask = self._calculate_rules()
+        with open(self.grammar_rules_path, 'w') as f:
+            json.dump({
+                'all_rules': self.all_rules,
+                'rules_mask': self.rules_mask,
+            }, f, indent=2, sort_keys=True)
+
+    def load(self):
+        self.vocab = vocab.Vocab.load(self.vocab_path)
+
+        observed_productions = json.load(open(self.observed_productions_path))
+        self.sum_type_constructors = observed_productions['sum_type_constructors']
+        self.field_presence_infos = observed_productions['field_presence_infos']
+        self.seq_lengths = observed_productions['seq_lengths']
+        self.primitive_types = observed_productions['primitive_types']
+
+        grammar = json.load(open(self.grammar_rules_path))
+        self.all_rules = tuplify(grammar['all_rules'])
+        self.rules_mask = grammar['rules_mask']
+
+    def dataset(self, section):
+        return [
+            NL2CodeDecoderPreprocItem(**json.loads(line))
+            for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+
+    def _record_productions(self, tree):
+        queue = [tree]
+        while queue:
+            node = queue.pop()
+            node_type = node['_type']
+
+            # Rules of the form:
+            # expr -> Attribute | Await | BinOp | BoolOp | ...
+            if node_type in self.ast_wrapper.constructors:
+                constructor = self.ast_wrapper.constructor_to_sum_type[node_type]
+                self.sum_type_constructors[constructor].add(node_type)
+
+            # Rules of the form:
+            # FunctionDef
+            # -> identifier name, arguments args
+            # |  identifier name, arguments args, stmt* body
+            # |  identifier name, arguments args, expr* decorator_list
+            # |  identifier name, arguments args, expr? returns
+            # ...
+            # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
+            assert node_type in self.ast_wrapper.singular_types
+            field_presence_info = get_field_presence_info(
+                    node,
+                    self.ast_wrapper.singular_types[node_type].fields)
+            self.field_presence_infos[node_type].add(field_presence_info)
+
+            # Rules of the form:
+            # stmt* -> stmt
+            #        | stmt stmt
+            #        | stmt stmt stmt
+            for field_info in self.ast_wrapper.singular_types[node_type].fields:
+                field_value = node.get(field_info.name)
+                to_enqueue = []
+                if field_info.seq:
+                    self.seq_lengths[field_info.type + '*'].add(len(field_value))
+                    to_enqueue = field_value
+                else:
+                    to_enqueue = [field_value]
+                for child in to_enqueue:
+                    if isinstance(child, collections.abc.Mapping) and '_type' in child:
+                        queue.append(child)
+                    else:
+                        self.primitive_types.add(type(child).__name__)
+
+    def _calculate_rules(self):
+        offset = 0
+
+        all_rules = []
+        rules_mask = {}
+
+        # Rules of the form:
+        # expr -> Attribute | Await | BinOp | BoolOp | ...
+        for parent, children in sorted(self.sum_type_constructors.items()):
+            assert not isinstance(children, set)
+            rules_mask[parent] = (offset, offset + len(children))
+            offset += len(children)
+            all_rules += [(parent, child) for child in children]
+
+        # Rules of the form:
+        # FunctionDef
+        # -> identifier name, arguments args
+        # |  identifier name, arguments args, stmt* body
+        # |  identifier name, arguments args, expr* decorator_list
+        # |  identifier name, arguments args, expr? returns
+        # ...
+        # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
+        for name, field_presence_infos in sorted(self.field_presence_infos.items()):
+            assert not isinstance(field_presence_infos, set)
+            rules_mask[name] = (offset, offset + len(field_presence_infos))
+            offset += len(field_presence_infos)
+            all_rules += [(name, presence) for presence in field_presence_infos]
+
+        # Rules of the form:
+        # stmt* -> stmt
+        #        | stmt stmt
+        #        | stmt stmt stmt
+        for seq_type_name, lengths in sorted(self.seq_lengths.items()):
+            assert not isinstance(lengths, set)
+            rules_mask[seq_type_name] = (offset, offset + len(lengths))
+            offset += len(lengths)
+            all_rules += [(seq_type_name, i) for i in lengths]
+
+        return tuple(all_rules), rules_mask
+
+
+    def _all_tokens(self, root):
+        queue = [root]
+        while queue:
+            node = queue.pop()
+            type_info = self.ast_wrapper.singular_types[node['_type']]
+
+            for field_info in reversed(type_info.fields):
+                field_value = node.get(field_info.name)
+                if field_info.type in asdl.builtin_types:
+                    for token in self._tokenize_field_value(field_value):
+                        yield token
+                elif isinstance(field_value, (list, tuple)):
+                    queue.extend(field_value)
+                elif field_value is not None:
+                    queue.append(field_value)
+
+    def _tokenize_field_value(self, field_value):
+        if isinstance(field_value, bytes):
+            field_value = field_value.encode('latin1')
+        else:
+            field_value = str(field_value)
+        return split_string_whitespace_and_camelcase(field_value)
+
+
 @registry.register('decoder', 'NL2Code')
 class NL2CodeDecoder(torch.nn.Module):
 
-    class Preproc(abstract_preproc.AbstractPreproc):
-        def __init__(
-                self,
-                save_path,
-                min_freq=3,
-                max_count=5000):
-            # TODO: don't hardcode Python.asdl
-            self.ast_wrapper = ast_util.ASTWrapper(
-                    asdl.parse(
-                        os.path.join(
-                            os.path.dirname(os.path.abspath(__file__)),
-                            '..',
-                            'Python.asdl')))
-
-            self.vocab_path = os.path.join(save_path, 'dec_vocab.json')
-            self.observed_productions_path = os.path.join(save_path, 'observed_productions.json')
-            self.data_dir = os.path.join(save_path, 'dec')
-
-            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
-            # TODO: Write 'train', 'val', 'test' somewhere else
-            self.items = {'train': [], 'val': [], 'test': []}
-            self.sum_type_constructors = collections.defaultdict(set)
-            self.field_presence_infos = collections.defaultdict(set)
-            self.seq_lengths = collections.defaultdict(set)
-            self.primitive_types = set()
-
-            self.vocab = None
-        
-        def validate_item(self, item, section):
-            try:
-                py_ast = ast.parse(item.code)
-                root = ast_util.convert_native_ast(py_ast)
-            except SyntaxError:
-                return section != 'train', None
-            return True, root
-
-        def add_item(self, item, section, validation_info):
-            root = validation_info
-            if section == 'train':
-                for token in self._all_tokens(root):
-                    self.vocab_builder.add_word(token)
-                self._record_productions(root)
-
-            self.items[section].append(
-                NL2CodeDecoderPreprocItem(
-                    tree=root,
-                    orig_code=item.code))
-        
-        def save(self):
-            os.makedirs(self.data_dir, exist_ok=True)
-            self.vocab = self.vocab_builder.finish()
-            self.vocab.save(self.vocab_path)
-
-            for section, items in self.items.items():
-                with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
-                    for item in items:
-                        f.write(json.dumps(attr.asdict(item)) + '\n')
-            
-            # observed_productions
-            with open(self.observed_productions_path, 'w') as f:
-                json.dump({
-                    'sum_type_constructors': to_dict_with_sorted_values(self.sum_type_constructors),
-                    'field_presence_infos': to_dict_with_sorted_values(self.field_presence_infos),
-                    'seq_lengths': to_dict_with_sorted_values(self.seq_lengths),
-                    'primitive_types': sorted(self.primitive_types),
-                }, f, indent=2, sort_keys=True)
-        
-        def load(self):
-            self.vocab = vocab.Vocab.load(self.vocab_path)
-            observed_productions = json.load(open(self.observed_productions_path))
-            self.sum_type_constructors = to_dict_with_set_values(observed_productions['sum_type_constructors'])
-            self.field_presence_infos = to_dict_with_set_values(observed_productions['field_presence_infos'])
-            self.seq_lengths = to_dict_with_set_values(observed_productions['seq_lengths'])
-            self.primitive_types = set(observed_productions['primitive_types'])
-
-        def dataset(self, section):
-            return [
-                NL2CodeDecoderPreprocItem(**json.loads(line))
-                for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
-        
-        def _record_productions(self, tree):
-            queue = [tree]
-            while queue:
-                node = queue.pop()
-                node_type = node['_type']
-
-                # Rules of the form:
-                # expr -> Attribute | Await | BinOp | BoolOp | ...
-                if node_type in self.ast_wrapper.constructors:
-                    constructor = self.ast_wrapper.constructor_to_sum_type[node_type]
-                    self.sum_type_constructors[constructor].add(node_type)
-
-                # Rules of the form:
-                # FunctionDef
-                # -> identifier name, arguments args
-                # |  identifier name, arguments args, stmt* body
-                # |  identifier name, arguments args, expr* decorator_list
-                # |  identifier name, arguments args, expr? returns
-                # ...
-                # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
-                assert node_type in self.ast_wrapper.singular_types
-                field_presence_info = get_field_presence_info(
-                        node,
-                        self.ast_wrapper.singular_types[node_type].fields)
-                self.field_presence_infos[node_type].add(field_presence_info)
-
-                # Rules of the form:
-                # stmt* -> stmt
-                #        | stmt stmt
-                #        | stmt stmt stmt
-                for field_info in self.ast_wrapper.singular_types[node_type].fields:
-                    field_value = node.get(field_info.name)
-                    to_enqueue = []
-                    if field_info.seq:
-                        self.seq_lengths[field_info.type + '*'].add(len(field_value))
-                        to_enqueue = field_value
-                    else:
-                        to_enqueue = [field_value]
-                    for child in to_enqueue:
-                        if isinstance(child, collections.abc.Mapping) and '_type' in child:
-                            queue.append(child)
-                        else:
-                            self.primitive_types.add(type(child).__name__)
-
-        def _all_tokens(self, root):
-            queue = [root]
-            while queue:
-                node = queue.pop()
-                type_info = self.ast_wrapper.singular_types[node['_type']]
-
-                for field_info in reversed(type_info.fields):
-                    field_value = node.get(field_info.name)
-                    if field_info.type in asdl.builtin_types:
-                        for token in self._tokenize_field_value(field_value):
-                            yield token
-                    elif isinstance(field_value, (list, tuple)):
-                        queue.extend(field_value)
-                    elif field_value is not None:
-                        queue.append(field_value)
-        
-        def _tokenize_field_value(self, field_value):
-            if isinstance(field_value, bytes):
-                field_value = field_value.encode('latin1')
-            else:
-                field_value = str(field_value)
-            return split_string_whitespace_and_camelcase(field_value)
+    Preproc = NL2CodeDecoderPreproc
 
     def __init__(
             self, 
@@ -354,8 +428,7 @@ class NL2CodeDecoder(torch.nn.Module):
         self.enc_recurrent_size = enc_recurrent_size
         self.recurrent_size = recurrent_size
 
-        self.all_rules, self.rules_mask = self._calculate_rules(self.preproc)
-        self.rules_index = {v: idx for idx, v in enumerate(self.all_rules)}
+        self.rules_index = {v: idx for idx, v in enumerate(self.preproc.all_rules)}
 
         self.node_type_vocab = vocab.Vocab(
                 sorted(self.preproc.primitive_types) +
@@ -380,9 +453,9 @@ class NL2CodeDecoder(torch.nn.Module):
         self.rule_logits = torch.nn.Sequential(
                 torch.nn.Linear(self.recurrent_size, self.rule_emb_size),
                 torch.nn.Tanh(),
-                torch.nn.Linear(self.rule_emb_size, len(self.all_rules)))
+                torch.nn.Linear(self.rule_emb_size, len(self.rules_index)))
         self.rule_embedding = torch.nn.Embedding(
-                num_embeddings=len(self.all_rules),
+                num_embeddings=len(self.rules_index),
                 embedding_dim=self.rule_emb_size)
 
         self.gen_logodds = torch.nn.Linear(self.recurrent_size, 1)
@@ -421,6 +494,7 @@ class NL2CodeDecoder(torch.nn.Module):
         # Rules of the form:
         # expr -> Attribute | Await | BinOp | BoolOp | ...
         for parent, children in sorted(preproc.sum_type_constructors.items()):
+            assert parent not in rules_mask
             rules_mask[parent] = (offset, offset + len(children))
             offset += len(children)
             all_rules += [(parent, child) for child in children]
@@ -434,6 +508,7 @@ class NL2CodeDecoder(torch.nn.Module):
         # ...
         # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
         for name, field_presence_infos in sorted(preproc.field_presence_infos.items()):
+            assert name not in rules_mask
             rules_mask[name] = (offset, offset + len(field_presence_infos))
             offset += len(field_presence_infos)
             all_rules += [(name, presence) for presence in field_presence_infos]
@@ -443,6 +518,7 @@ class NL2CodeDecoder(torch.nn.Module):
         #        | stmt stmt
         #        | stmt stmt stmt
         for seq_type_name, lengths in sorted(preproc.seq_lengths.items()):
+            assert seq_type_name not in rules_mask
             rules_mask[seq_type_name] = (offset, offset + len(lengths))
             offset += len(lengths)
             all_rules += [(seq_type_name, i) for i in lengths]
