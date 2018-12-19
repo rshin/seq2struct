@@ -1,6 +1,7 @@
 import collections
 import collections.abc
 import json
+import operator
 
 
 class Sentinel(object):
@@ -72,7 +73,7 @@ class Vocab(collections.abc.Set):
     def __hash__(self):
         # type: () -> int
         return id(self)
-    
+
     @classmethod
     def load(self, in_path):
         return Vocab(json.load(open(in_path)), special_elems=())
@@ -87,10 +88,10 @@ class VocabBuilder:
         self.word_freq = collections.Counter()
         self.min_freq = min_freq
         self.max_count = max_count
-    
+
     def add_word(self, word):
         self.word_freq[word] += 1
-    
+
     def finish(self):
         # Select the `max_count` most frequent words. If `max_count` is None, then choose all of the words.
         eligible_words_and_freqs = self.word_freq.most_common(self.max_count)
@@ -99,5 +100,5 @@ class VocabBuilder:
                 if freq < self.min_freq:
                     eligible_words_and_freqs = eligible_words_and_freqs[:i]
                     break
-        
-        return Vocab(word for word, freq in eligible_words_and_freqs)
+
+        return Vocab(word for word, freq in sorted(eligible_words_and_freqs))
