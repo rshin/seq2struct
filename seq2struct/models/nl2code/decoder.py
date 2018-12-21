@@ -607,12 +607,14 @@ class NL2CodeDecoder(torch.nn.Module):
 
         return output, new_state, rule_logits
     
-    def rule_infer(node_type, rule_logits):
+    def rule_infer(self, node_type, rule_logits):
         rule_logprobs = torch.nn.functional.log_softmax(rule_logits, dim=-1)
         rules_start, rules_end = self.preproc.rules_mask[node_type]
 
         # TODO: Mask other probabilities first?
-        return zip(range(rules_start, rules_end), rules_logprobs[:, rules_start:rules_end])
+        return list(zip(
+            range(rules_start, rules_end),
+            rule_logprobs[0, rules_start:rules_end]))
 
     def apply_rule_loss(
             self,
@@ -727,7 +729,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
         return new_state, action_emb, loss_piece
     
-    def token_infer(output, gen_logodds, desc_enc):
+    def token_infer(self, output, gen_logodds, desc_enc):
         # Copy tokens
         # log p(copy | output)
         # shape: batch (=1)
@@ -741,7 +743,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
         log_prob_by_word = collections.defaultdict(
             int,
-            zip(desc_enc.words, copy_loc_logprob.squeeze(0)))
+            zip(desc_enc.words, copy_loc_logprobs.squeeze(0)))
         
         # Generate tokens
         # log p(~copy | output)
@@ -758,7 +760,7 @@ class NL2CodeDecoder(torch.nn.Module):
         for idx in range(token_logprobs.shape[1]):
             log_prob_by_word[self.terminal_vocab[idx]] += token_logprobs[0, idx]
         
-        return log_prob_by_word
+        return list(log_prob_by_word.items())
 
 
 def get_field_presence_info(node, field_infos):
@@ -794,18 +796,18 @@ class TreeTraversal:
         parent_field_name = attr.ib()
     
     class State(enum.Enum):
-        SUM_TYPE_INQUIRE = enum.auto
-        SUM_TYPE_APPLY = enum.auto
+        SUM_TYPE_INQUIRE = 0
+        SUM_TYPE_APPLY = 1
 
-        CHILDREN_INQUIRE = enum.auto
-        CHILDREN_APPLY = enum.auto
+        CHILDREN_INQUIRE = 2
+        CHILDREN_APPLY = 3
 
-        LIST_LENGTH_INQUIRE = enum.auto
-        LIST_LENGTH_APPLY = enum.auto
+        LIST_LENGTH_INQUIRE = 4
+        LIST_LENGTH_APPLY = 5
 
-        GEN_TOKEN = enum.auto
+        GEN_TOKEN = 6
 
-        NODE_FINISHED = enum.auto
+        NODE_FINISHED = 7
 
     class TreeAction:
         pass
@@ -818,6 +820,12 @@ class TreeTraversal:
     @attr.s
     class CreateParentFieldList(TreeAction):
         parent_field_name = attr.ib()
+
+    @attr.s
+    class AppendParentField(TreeAction):
+        parent_field_name = attr.ib()
+        value = attr.ib()
+        terminal_type = attr.ib()
     
     @attr.s
     class NodeFinished(TreeAction):
@@ -827,20 +835,32 @@ class TreeTraversal:
         self.model = model
         self.ast_wrapper = model.ast_wrapper
 
-        self.state = lstm_init(model._device, 1, self.recurrent_size, 1)
+        self.state = lstm_init(model._device, 1, self.model.recurrent_size, 1)
         self.prev_action_emb = model.zero_rule_emb
         self.desc_enc = desc_enc
 
         self.queue = []
 
-        self.cur_item = TreeTraversal.QueueItem()
+        self.cur_item = TreeTraversal.QueueItem(
+                state=TreeTraversal.State.CHILDREN_INQUIRE,
+                node_type='Module',
+                parent_action_emb=self.model.zero_rule_emb,
+                parent_h=self.model.zero_recurrent_emb,
+                parent_field_name=None)
         self.parent_h = None
 
         self.actions = []
         self.update_prev_action_emb = self.update_prev_action_emb_apply_rule
     
     def step(self, last_choice):
-        from TreeTraversal.State import *
+        SUM_TYPE_INQUIRE    = TreeTraversal.State.SUM_TYPE_INQUIRE
+        SUM_TYPE_APPLY      = TreeTraversal.State.SUM_TYPE_APPLY
+        CHILDREN_INQUIRE    = TreeTraversal.State.CHILDREN_INQUIRE
+        CHILDREN_APPLY      = TreeTraversal.State.CHILDREN_APPLY
+        LIST_LENGTH_INQUIRE = TreeTraversal.State.LIST_LENGTH_INQUIRE
+        LIST_LENGTH_APPLY   = TreeTraversal.State.LIST_LENGTH_APPLY
+        GEN_TOKEN           = TreeTraversal.State.GEN_TOKEN
+        NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
         self.update_prev_action_emb(last_choice)
 
@@ -848,7 +868,7 @@ class TreeTraversal:
             # 1. ApplyRule, like expr -> Call
             if self.cur_item.state == SUM_TYPE_INQUIRE:
                 # a. Ask which one to choose
-                output, self.state, rule_logits = self.apply_rule(
+                output, self.state, rule_logits = self.model.apply_rule(
                         self.cur_item.node_type, 
                         self.state,
                         self.prev_action_emb,
@@ -863,7 +883,7 @@ class TreeTraversal:
 
             elif self.cur_item.state == SUM_TYPE_APPLY:
                 # b. Add action, prepare for #2
-                sum_type, singular_type = self.preproc.all_rules[last_choice]
+                sum_type, singular_type = self.model.preproc.all_rules[last_choice]
                 assert sum_type == self.cur_item.node_type
 
                 self.cur_item.node_type = singular_type
@@ -876,7 +896,7 @@ class TreeTraversal:
             # 2. ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
             elif self.cur_item.state == CHILDREN_INQUIRE:
                 self.actions.append(
-                    TreeTraversal.SetField(
+                    TreeTraversal.SetParentField(
                         self.cur_item.parent_field_name, {'_type': self.cur_item.node_type}))
 
                 # Check if we have no children
@@ -889,7 +909,7 @@ class TreeTraversal:
                         return None
 
                 # a. Ask about presence
-                output, self.state, rule_logits = self.apply_rule(
+                output, self.state, rule_logits = self.model.apply_rule(
                         self.cur_item.node_type, 
                         self.state,
                         self.prev_action_emb,
@@ -904,7 +924,7 @@ class TreeTraversal:
             
             elif self.cur_item.state == CHILDREN_APPLY:
                 # b. Create the children
-                node_type, children_presence = self.preproc.all_rules[last_choice]
+                node_type, children_presence = self.model.preproc.all_rules[last_choice]
                 assert node_type == self.cur_item.node_type
 
                 self.queue.append(TreeTraversal.QueueItem(
@@ -915,7 +935,7 @@ class TreeTraversal:
                     parent_field_name=None
                 ))
                 for field_info, present in reversed(
-                        list(zip(self.ast_wrapper.singular_types[node_type].fields))):
+                        list(zip(self.ast_wrapper.singular_types[node_type].fields, children_presence))):
                     if not present:
                         continue
 
@@ -955,7 +975,7 @@ class TreeTraversal:
             
             elif self.cur_item.state == LIST_LENGTH_INQUIRE:
                 list_type = self.cur_item.node_type + '*'
-                output, self.state, rule_logits = self.apply_rule(
+                output, self.state, rule_logits = self.model.apply_rule(
                         list_type,
                         self.state,
                         self.prev_action_emb,
@@ -969,7 +989,7 @@ class TreeTraversal:
                 return self.model.rule_infer(list_type, rule_logits)
             
             elif self.cur_item.state == LIST_LENGTH_APPLY:
-                list_type, num_children = self.preproc.all_rules[last_choice]
+                list_type, num_children = self.model.preproc.all_rules[last_choice]
                 elem_type = self.cur_item.node_type
                 assert list_type == elem_type + '*'
 
@@ -1002,9 +1022,13 @@ class TreeTraversal:
                         return None
                 elif last_choice is not None:
                     # token_idx shape: batch (=1), LongTensor
-                    token_idx = self.model._index(self.terminal_vocab, last_choice)
+                    token_idx = self.model._index(self.model.terminal_vocab, last_choice)
                     # action_emb shape: batch (=1) x emb_size
                     self.prev_action_emb = self.model.terminal_embedding(token_idx)
+                    self.actions.append(TreeTraversal.AppendParentField(
+                        self.cur_item.parent_field_name,
+                        last_choice,
+                        self.cur_item.node_type))
 
                 self.state, output, gen_logodds = self.model.gen_token(
                         self.cur_item.node_type,
@@ -1016,10 +1040,10 @@ class TreeTraversal:
                 log_probs_by_word = self.model.token_infer(output, gen_logodds, self.desc_enc)
 
                 self.update_prev_action_emb = self.update_prev_action_emb_gen_token
-                return log_probs_by_word.items()
+                return log_probs_by_word
 
             elif self.cur_item.state == NODE_FINISHED:
-                self.actions.append(NodeFinished())
+                self.actions.append(TreeTraversal.NodeFinished())
                 if self.pop():
                     continue
                 else:
@@ -1040,13 +1064,13 @@ class TreeTraversal:
         if last_choice is None:
             return
         # rule_idx shape: batch (=1)
-        rule_idx = self.model._tensor([self.model.rules_index[last_choice]])
+        rule_idx = self.model._tensor([last_choice])
         # action_emb shape: batch (=1) x emb_size
-        self.prev_action_emb = self.rule_embedding(rule_idx)
+        self.prev_action_emb = self.model.rule_embedding(rule_idx)
     
-     def pop(self):
-         self.parent_h = None
-         if self.queue:
-            self.cur_item = self.queue.pop()
-            return True
+    def pop(self):
+        self.parent_h = None
+        if self.queue:
+           self.cur_item = self.queue.pop()
+           return True
         return False

@@ -1,6 +1,7 @@
 import argparse
 import collections
 import datetime
+import itertools
 import json
 import os
 
@@ -53,8 +54,7 @@ def main():
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
 
     # 2. Restore its parameters
-    saver = saver_mod.Saver(
-        model, optimizer, keep_every_n=train_config.keep_every_n)
+    saver = saver_mod.Saver(model, optimizer)
     last_step = saver.restore(args.logdir)
 
     # 3. Get training data somewhere
@@ -66,11 +66,19 @@ def main():
     traversal = model.decoder.infer(enc_state)
 
     choices = traversal.step(None)
-    while True:
+    for i in itertools.count():
+        choices.sort(key=lambda c: c[1], reverse=True)
+        print('Step {}'.format(i))
+        print('- Top choices: {}'.format(choices[:3]))
+        print('- Current tree: {}'.format(traversal.actions))
+
         best_choice, best_score = max(choices, key=lambda c: c[1])
-        choices = traversal.step(best_score)
+        choices = traversal.step(best_choice)
         if choices is None:
             break
+
+    import IPython
+    IPython.embed()
 
 
 if __name__ == '__main__':
