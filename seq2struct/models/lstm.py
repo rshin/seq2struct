@@ -47,14 +47,14 @@ class RecurrentDropoutLSTMCell(RNNCellBase):
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.orthogonal(self.W_i)
-        init.orthogonal(self.U_i)
-        init.orthogonal(self.W_f)
-        init.orthogonal(self.U_f)
-        init.orthogonal(self.W_c)
-        init.orthogonal(self.U_c)
-        init.orthogonal(self.W_o)
-        init.orthogonal(self.U_o)
+        init.orthogonal_(self.W_i)
+        init.orthogonal_(self.U_i)
+        init.orthogonal_(self.W_f)
+        init.orthogonal_(self.U_f)
+        init.orthogonal_(self.W_c)
+        init.orthogonal_(self.U_c)
+        init.orthogonal_(self.W_o)
+        init.orthogonal_(self.U_o)
         self.bias_ih.data.fill_(0.)
         # forget gate set to 1.
         self.bias_ih.data[self.hidden_size:2 * self.hidden_size].fill_(1.)
