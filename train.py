@@ -77,11 +77,13 @@ def main():
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
         registry.lookup('model', config['model']).Preproc,
-        config['model'])
+        config['model'],
+        unused_keys=('name',))
     model_preproc.load()
 
     # 1. Construct model
-    model = registry.construct('model', config['model'], preproc=model_preproc, device=device)
+    model = registry.construct('model', config['model'],
+            unused_keys=('encoder_preproc', 'decoder_preproc'), preproc=model_preproc, device=device)
     model.to(device)
 
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())

@@ -1,6 +1,8 @@
 import collections
 import collections.abc
 import inspect
+import sys
+
 
 _REGISTRY = collections.defaultdict(dict)
 
@@ -26,11 +28,15 @@ def lookup(kind, name):
     return _REGISTRY[kind][name]
 
 
-def construct(kind, config, **kwargs):
-    return instantiate(lookup(kind, config), config, **kwargs)
+def construct(kind, config, unused_keys=(), **kwargs):
+    return instantiate(
+            lookup(kind, config),
+            config,
+            unused_keys + ('name',),
+            **kwargs)
 
 
-def instantiate(callable, config, **kwargs):
+def instantiate(callable, config, unused_keys=(), **kwargs):
     merged = {**config, **kwargs}
     signature = inspect.signature(callable)
     for name, param in signature.parameters.items():
@@ -40,7 +46,12 @@ def instantiate(callable, config, **kwargs):
     if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
         return callable(**merged)
 
+    missing = {}
     for key in list(merged.keys()):
         if key not in signature.parameters:
+            if key not in unused_keys:
+                missing[key] = merged[key]
             merged.pop(key)
+    if missing:
+        print('WARNING {}: superfluous {}'.format(callable, missing), file=sys.stderr)
     return callable(**merged)
