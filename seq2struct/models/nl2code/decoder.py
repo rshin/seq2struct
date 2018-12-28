@@ -8,18 +8,21 @@ import re
 
 import asdl
 import attr
+import pyrsistent
 import torch
 
 from seq2struct import ast_util
-from seq2struct import models
 from seq2struct.models import abstract_preproc
 from seq2struct.models import attention
+from seq2struct.models import lstm
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 
 
 def lstm_init(device, num_layers, hidden_size, *batch_sizes):
-    init_size = (num_layers, ) + batch_sizes + (hidden_size, )
+    init_size = batch_sizes + (hidden_size, )
+    if num_layers is not None:
+        init_size = (num_layers, ) + init_size
     init = torch.zeros(*init_size, device=device)
     return (init, init)
 
@@ -313,6 +316,7 @@ class NL2CodeDecoder(torch.nn.Module):
             # TODO: This should be automatically inferred from encoder
             enc_recurrent_size=256,
             recurrent_size=256,
+            dropout=0.,
             desc_attn=None,
             copy_pointer=None):
         super().__init__()
@@ -335,10 +339,10 @@ class NL2CodeDecoder(torch.nn.Module):
                 sorted(self.preproc.seq_lengths.keys()),
                 special_elems=())
 
-        self.state_update = torch.nn.LSTM(
-                self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
-                self.recurrent_size,
-                num_layers=1)
+        self.state_update = lstm.RecurrentDropoutLSTMCell(
+                input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
+                hidden_size=self.recurrent_size,
+                dropout=dropout)
         if desc_attn is None:
             self.desc_attn = attention.BahdanauAttention(
                     query_size=self.recurrent_size,
@@ -439,7 +443,8 @@ class NL2CodeDecoder(torch.nn.Module):
         #   Original NL2Code:
         #     This never happens because all missing fields are
         #     omitted from the node.
-        state = lstm_init(self._device, 1, self.recurrent_size, 1)
+        self.state_update.set_dropout_masks(batch_size=1)
+        state = lstm_init(self._device, None, self.recurrent_size, 1)
         prev_action_emb = self.zero_rule_emb
 
         loss = []
@@ -470,7 +475,7 @@ class NL2CodeDecoder(torch.nn.Module):
                         vocab.EOS]
 
                 for token in field_value_split:
-                    state, prev_action_emb, loss_piece = self.gen_token(
+                    state, prev_action_emb, loss_piece = self.gen_token_loss(
                             field_type,
                             token,
                             state,
@@ -562,10 +567,9 @@ class NL2CodeDecoder(torch.nn.Module):
 
     def _desc_attention(self, prev_state, desc_enc):
         # prev_state shape:
-        # - h_n: num_layers * num_directions (=1) x batch (=1) x emb_size
-        # - c_n: num_layers * num_directions (=1) x batch (=1) x emb_size
-        prev_state_h, prev_state_c = prev_state
-        query = prev_state_h[-1]
+        # - h_n: batch (=1) x emb_size
+        # - c_n: batch (=1) x emb_size
+        query = prev_state[0]
         return self.desc_attn(query, desc_enc.memory, attn_mask=None)
     
     def _tensor(self, data, dtype=None):
@@ -597,11 +601,11 @@ class NL2CodeDecoder(torch.nn.Module):
                 node_type_emb,  # n_{f-t}: node_emb_size
             ),
             dim=-1)
-        output, new_state = self.state_update(
+        new_state = self.state_update(
                 # state_input shape: batch (=1) x (emb_size * 5)
-                state_input.unsqueeze(dim=0), prev_state)
+                state_input, prev_state)
         # output shape: batch (=1) x emb_size
-        output = output.squeeze(0)
+        output = new_state[0]
         # rule_logits shape: batch (=1) x num choices
         rule_logits = self.rule_logits(output)
 
@@ -660,10 +664,10 @@ class NL2CodeDecoder(torch.nn.Module):
             ),
             dim=-1)
         # state_input shape: batch (=1) x (emb_size * 5)
-        output, new_state = self.state_update(
-                state_input.unsqueeze(dim=0), prev_state)
+        new_state = self.state_update(
+                state_input, prev_state)
         # output shape: batch (=1) x emb_size
-        output = output.squeeze(0)
+        output = new_state[0]
 
         # gen_logodds shape: batch (=1)
         gen_logodds = self.gen_logodds(output).squeeze(1)

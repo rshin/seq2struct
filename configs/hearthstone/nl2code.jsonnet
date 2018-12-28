@@ -14,10 +14,11 @@
         name: 'EncDec',
         encoder: {
             name: 'NL2Code',
+            dropout: 0.2,
         },   
         decoder: {
             name: 'NL2Code',
-            # dropout
+            dropout: 0.2,
         },
         encoder_preproc: {
             save_path: 'data/hearthstone/nl2code/',

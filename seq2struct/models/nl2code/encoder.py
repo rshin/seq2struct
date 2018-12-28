@@ -5,6 +5,7 @@ import attr
 import torch
 
 from seq2struct.models import abstract_preproc
+from seq2struct.models import lstm
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 
@@ -67,7 +68,8 @@ class NL2CodeEncoder(torch.nn.Module):
             device,
             preproc,
             word_emb_size=128,
-            recurrent_size=256):
+            recurrent_size=256,
+            dropout=0.):
         super().__init__()
         self._device = device
         self.desc_vocab = preproc.vocab
@@ -79,12 +81,11 @@ class NL2CodeEncoder(torch.nn.Module):
         self.desc_embedding = torch.nn.Embedding(
                 num_embeddings=len(self.desc_vocab),
                 embedding_dim=self.word_emb_size)
-        self.encoder = torch.nn.LSTM(
+        self.encoder = lstm.LSTM(
                 input_size=self.word_emb_size,
                 hidden_size=self.recurrent_size // 2,
-                num_layers=1,
-                batch_first=True,
-                bidirectional=True)
+                bidirectional=True,
+                dropout=dropout)
 
     def forward(self, desc_words):
         # desc_indices shape: batch (=1) x desc length
@@ -93,8 +94,10 @@ class NL2CodeEncoder(torch.nn.Module):
                 device=self._device).unsqueeze(0)
         # desc_emb shape: batch (=1) x desc length x word_emb_size
         desc_emb = self.desc_embedding(desc_indices)
+        # desc_emb shape: desc length x batch (=1) x word_emb_size
+        desc_emb = desc_emb.transpose(0, 1)
 
-        # outputs shape: batch (=1) x desc length x recurrent_size
+        # outputs shape: desc length x batch (=1) x recurrent_size
         # state shape:
         # - h: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
         # - c: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
@@ -102,7 +105,7 @@ class NL2CodeEncoder(torch.nn.Module):
 
         return NL2CodeEncoderState(
             state=state,
-            memory=outputs,
+            memory=outputs.transpose(0, 1),
             words=desc_words)
     
     @classmethod
