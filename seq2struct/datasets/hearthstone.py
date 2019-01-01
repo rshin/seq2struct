@@ -1,4 +1,5 @@
 import ast
+import itertools
 import re
 
 import attr
@@ -19,12 +20,14 @@ class HearthstoneItem:
 
 @registry.register('dataset', 'hearthstone')
 class HearthstoneDataset(torch.utils.data.Dataset): 
-    def __init__(self, filename):
+    def __init__(self, filename, limit=None):
         self.filename = filename
         self.examples = []
-        for example in zip(
+        for example in itertools.islice(
+                zip(
                     open(self.filename + '.in'),
-                    open(self.filename + '.out')):
+                    open(self.filename + '.out')),
+                limit):
             processed = self._process(example)
             if processed is not None:
                 self.examples.append(processed)
