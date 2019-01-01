@@ -75,3 +75,8 @@ class EncDecModel(torch.nn.Module):
         batch_size = len(batch)
         result = {'loss': mean_loss * batch_size, 'total': batch_size}
         return result
+
+    def begin_inference(self, item):
+        enc_input, dec_output = item
+        enc_state = self.encoder(enc_input)
+        return model.decoder.infer(enc_state)

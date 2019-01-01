@@ -1,4 +1,5 @@
 import argparse
+import ast
 import collections
 import datetime
 import itertools
@@ -8,7 +9,9 @@ import os
 import _jsonnet
 import attr
 import asdl
+import astor
 import torch
+import tqdm
 
 from seq2struct import ast_util
 from seq2struct.utils import registry
@@ -63,19 +66,23 @@ def main():
     # TODO don't assume EncDecModel
     enc_input, dec_output = train_data[0]
     enc_state = model.encoder(enc_input)
-    traversal = model.decoder.infer(enc_state)
 
-    choices = traversal.step(None)
-    for i in itertools.count():
-        choices.sort(key=lambda c: c[1], reverse=True)
-        print('Step {}'.format(i))
-        print('- Top choices: {}'.format(choices[:3]))
-        print('- Current tree: {}'.format(traversal.actions))
-
+    traversal, choices = model.decoder.begin_inference(enc_state)
+    for i in tqdm.tqdm(itertools.count()):
+        #choices.sort(key=lambda c: c[1], reverse=True)
+        #print('Step {}'.format(i))
+        #print('- Top choices: {}'.format(choices[:3]))
+        #print('- Current tree: {}'.format(traversal.actions))
         best_choice, best_score = max(choices, key=lambda c: c[1])
         choices = traversal.step(best_choice)
         if choices is None:
             break
+
+    # TODO don't assume Hearthstone
+    tree = traversal.finalize()
+    ast_tree = ast_util.to_native_ast(tree)
+    inferred_code = astor.to_source(ast_tree)
+    canonicalized_gold_code = astor.to_source(ast.parse(dec_output.orig_code))
 
     import IPython
     IPython.embed()

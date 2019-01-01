@@ -234,3 +234,15 @@ def convert_native_ast(node):
         else:
             result[field] = convert_native_ast(value)
     return result
+
+
+def to_native_ast(node):
+    if isinstance(node, (list, tuple)):
+        return [to_native_ast(item) for item in node]
+    elif not isinstance(node, dict):
+        return node
+
+    result = getattr(ast, node['_type'])()
+    for field, value in node.items():
+        setattr(result, field, to_native_ast(value))
+    return result
