@@ -79,4 +79,4 @@ class EncDecModel(torch.nn.Module):
     def begin_inference(self, item):
         enc_input, dec_output = item
         enc_state = self.encoder(enc_input)
-        return model.decoder.infer(enc_state)
+        return self.decoder.begin_inference(enc_state)

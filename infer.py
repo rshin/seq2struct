@@ -1,6 +1,7 @@
 import argparse
 import ast
 import collections
+import copy
 import datetime
 import itertools
 import json
@@ -14,6 +15,7 @@ import torch
 import tqdm
 
 from seq2struct import ast_util
+from seq2struct import beam_search
 from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
 from seq2struct.utils import vocab
@@ -36,6 +38,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', required=True)
     parser.add_argument('--config', required=True)
+
+    parser.add_argument('--section', default='train')
+    parser.add_argument('--output', required=True)
+    parser.add_argument('--beam-size', required=True, type=int)
+    parser.add_argument('--limit', type=int)
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -53,6 +60,7 @@ def main():
     # 1. Construct model
     model = registry.construct('model', config['model'], preproc=model_preproc, device=device)
     model.to(device)
+    model.eval()
 
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
 
@@ -61,31 +69,42 @@ def main():
     last_step = saver.restore(args.logdir)
 
     # 3. Get training data somewhere
-    train_data = model_preproc.dataset('train')
+    # TODO don't assume EncDecModel, Hearthstone
+    output = open(args.output, 'w')
 
-    # TODO don't assume EncDecModel
-    enc_input, dec_output = train_data[0]
-    enc_state = model.encoder(enc_input)
+    data = model_preproc.dataset(args.section)
+    for item in tqdm.tqdm(itertools.islice(data, args.limit)):
+        beams = beam_search.beam_search(
+                model, item, beam_size=args.beam_size, max_steps=1000)
 
-    traversal, choices = model.decoder.begin_inference(enc_state)
-    for i in tqdm.tqdm(itertools.count()):
-        #choices.sort(key=lambda c: c[1], reverse=True)
-        #print('Step {}'.format(i))
-        #print('- Top choices: {}'.format(choices[:3]))
-        #print('- Current tree: {}'.format(traversal.actions))
-        best_choice, best_score = max(choices, key=lambda c: c[1])
-        choices = traversal.step(best_choice)
-        if choices is None:
-            break
+        decoded = []
+        for beam in beams:
+            try:
+                tree = beam.inference_state.finalize()
+                ast_tree = ast_util.to_native_ast(tree)
+                inferred_code = astor.to_source(ast_tree)
+            except Exception as e:
+                tree = {'_error': str(e)}
+                inferred_code = 'ERROR'
 
-    # TODO don't assume Hearthstone
-    tree = traversal.finalize()
-    ast_tree = ast_util.to_native_ast(tree)
-    inferred_code = astor.to_source(ast_tree)
-    canonicalized_gold_code = astor.to_source(ast.parse(dec_output.orig_code))
+            enc_input, dec_output = item
+            decoded.append({
+                # TODO remove deepcopy
+                'tree': copy.deepcopy(tree),
+                'inferred_code': inferred_code,
+                'score': beam.score,
+                'choice_history': beam.choice_history,
+                'score_history': beam.score_history,
+            })
 
-    import IPython
-    IPython.embed()
+        canonicalized_gold_code = astor.to_source(
+            ast.parse(dec_output.orig_code))
+        output.write(
+            json.dumps({
+                'beams': decoded,
+                'gold_code': canonicalized_gold_code
+            }) + '\n')
+        output.flush()
 
 
 if __name__ == '__main__':

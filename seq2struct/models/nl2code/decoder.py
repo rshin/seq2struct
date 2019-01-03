@@ -71,6 +71,17 @@ def tuplify(x):
     return tuple(tuplify(elem) for elem in x)
 
 
+def accumulate_logprobs(d, keys_and_logprobs):
+    for key, logprob in keys_and_logprobs:
+        existing = d.get(key)
+        if existing is None:
+            d[key] = logprob
+        else:
+            d[key] = torch.logsumexp(
+                torch.stack((logprob, existing), dim=0),
+                dim=0)
+
+
 @attr.s
 class NL2CodeDecoderPreprocItem:
     tree = attr.ib()
@@ -296,8 +307,6 @@ class TreeState:
     parent_h = attr.ib()
     parent_field_type = attr.ib()
     debug_path = attr.ib()
-
-
 
 
 @registry.register('decoder', 'NL2Code')
@@ -747,8 +756,12 @@ class NL2CodeDecoder(torch.nn.Module):
         # log p(loc_i, copy | output)
         copy_loc_logprobs += copy_logprob
 
-        log_prob_by_word = dict(
-                zip(desc_enc.words, copy_loc_logprobs.squeeze(0)))
+        log_prob_by_word = {}
+        # accumulate_logprobs is needed because the same word may appear
+        # multiple times in desc_enc.words.
+        accumulate_logprobs(
+            log_prob_by_word,
+            zip(desc_enc.words, copy_loc_logprobs.squeeze(0)))
         
         # Generate tokens
         # log p(~copy | output)
@@ -762,13 +775,9 @@ class NL2CodeDecoder(torch.nn.Module):
         # shape: batch (=1) x vocab size
         token_logprobs += gen_logprob
 
-        for idx in range(token_logprobs.shape[1]):
-            word = self.terminal_vocab[idx]
-            log_prob_by_word[word] = torch.logsumexp(
-                maybe_stack(
-                    [token_logprobs[0, idx], log_prob_by_word.get(word)],
-                    dim=0),
-                dim=0)
+        accumulate_logprobs(
+            log_prob_by_word,
+            ((self.terminal_vocab[idx], token_logprobs[0, idx]) for idx in range(token_logprobs.shape[1])))
         
         return list(log_prob_by_word.items())
 
@@ -835,12 +844,6 @@ class TreeTraversal:
     class CreateParentFieldList(TreeAction):
         parent_field_name = attr.ib()
 
-    #@attr.s(frozen=True)
-    #class AppendParentField(TreeAction):
-    #    parent_field_name = attr.ib()
-    #    value = attr.ib()
-    #    terminal_type = attr.ib()
-
     @attr.s(frozen=True)
     class AppendTerminalToken(TreeAction):
         parent_field_name = attr.ib()
@@ -867,14 +870,12 @@ class TreeTraversal:
         self.prev_action_emb = model.zero_rule_emb
 
         self.queue = pyrsistent.pvector()
-        # TODO pyrsistent
         self.cur_item = TreeTraversal.QueueItem(
                 state=TreeTraversal.State.CHILDREN_INQUIRE,
                 node_type='Module',
                 parent_action_emb=self.model.zero_rule_emb,
                 parent_h=self.model.zero_recurrent_emb,
                 parent_field_name=None)
-        self.parent_h = None
 
         self.actions = pyrsistent.pvector()
         self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
@@ -883,11 +884,10 @@ class TreeTraversal:
         other = TreeTraversal(None, None)
         other.model = self.model
         other.desc_enc = self.desc_enc
-        other.state = self.recurrent_state
+        other.recurrent_state = self.recurrent_state
         other.prev_action_emb = self.prev_action_emb
         other.queue = self.queue
         other.cur_item = self.cur_item
-        other.parent_h = self.parent_h
         other.actions = self.actions
         other.update_prev_action_emb_type = self.update_prev_action_emb_type
         return other
@@ -904,13 +904,8 @@ class TreeTraversal:
 
         if last_choice is not None:
             self.update_prev_action_emb(last_choice)
-            #if isinstance(last_choice, int):
-            #    print('> {}'.format(self.model.preproc.all_rules[last_choice]))
-            #else:
-            #    print('> {}'.format(last_choice))
 
         while True:
-            #print('{} {}'.format(self.cur_item.state, ['{}/{}'.format(item.state, item.node_type) for item in self.queue]))
             # 1. ApplyRule, like expr -> Call
             if self.cur_item.state == SUM_TYPE_INQUIRE:
                 # a. Ask which one to choose
@@ -921,8 +916,10 @@ class TreeTraversal:
                         self.cur_item.parent_h, 
                         self.cur_item.parent_action_emb,
                         self.desc_enc)
-                self.parent_h = output
-                self.cur_item = attr.evolve(self.cur_item, state=SUM_TYPE_APPLY)
+                self.cur_item = attr.evolve(
+                        self.cur_item,
+                        state=SUM_TYPE_APPLY,
+                        parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
                 return self.model.rule_infer(self.cur_item.node_type, rule_logits)
@@ -965,8 +962,10 @@ class TreeTraversal:
                         self.cur_item.parent_h, 
                         self.cur_item.parent_action_emb,
                         self.desc_enc)
-                self.parent_h = output
-                self.cur_item = attr.evolve(self.cur_item, state=CHILDREN_APPLY)
+                self.cur_item = attr.evolve(
+                        self.cur_item,
+                        state=CHILDREN_APPLY,
+                        parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
                 return self.model.rule_infer(self.cur_item.node_type, rule_logits)
@@ -1013,7 +1012,7 @@ class TreeTraversal:
                         state=child_state,
                         node_type=child_type,
                         parent_action_emb=self.prev_action_emb,
-                        parent_h=self.parent_h,
+                        parent_h=self.cur_item.parent_h,
                         parent_field_name=field_info.name,
                     ))
                 
@@ -1031,8 +1030,10 @@ class TreeTraversal:
                         self.cur_item.parent_h, 
                         self.cur_item.parent_action_emb,
                         self.desc_enc)
-                self.parent_h = output
-                self.cur_item = attr.evolve(self.cur_item, state=LIST_LENGTH_APPLY)
+                self.cur_item = attr.evolve(
+                        self.cur_item,
+                        state=LIST_LENGTH_APPLY,
+                        parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
                 return self.model.rule_infer(list_type, rule_logits)
@@ -1056,7 +1057,7 @@ class TreeTraversal:
                         state=child_state,
                         node_type=elem_type,
                         parent_action_emb=self.prev_action_emb,
-                        parent_h=self.parent_h,
+                        parent_h=self.cur_item.parent_h,
                         parent_field_name=self.cur_item.parent_field_name,
                     ))
                 self.actions = self.actions.append(TreeTraversal.CreateParentFieldList(self.cur_item.parent_field_name))
@@ -1078,10 +1079,6 @@ class TreeTraversal:
                     else:
                         return None
                 elif last_choice is not None:
-                    # token_idx shape: batch (=1), LongTensor
-                    #token_idx = self.model._index(self.model.terminal_vocab, last_choice)
-                    ## action_emb shape: batch (=1) x emb_size
-                    #self.prev_action_emb = self.model.terminal_embedding(token_idx)
                     self.actions = self.actions.append(TreeTraversal.AppendTerminalToken(
                         self.cur_item.parent_field_name,
                         last_choice))
@@ -1124,7 +1121,6 @@ class TreeTraversal:
             raise ValueError(self.update_prev_action_emb_type)
 
     def pop(self):
-        self.parent_h = None
         if self.queue:
            self.cur_item = self.queue[-1]
            self.queue = self.queue.delete(-1)
