@@ -43,6 +43,7 @@ class ASTWrapperVisitor(asdl.VisitorBase):
 
     def visitConstructor(self, cons, _name):
         # type: (asdl.Constructor, str) -> None
+        assert cons.name not in self.constructors
         self.constructors[cons.name] = cons
         if not cons.fields:
             self.fieldless_constructors[cons.name] = cons
@@ -118,86 +119,84 @@ class ASTWrapper(object):
         # type: () -> str
         return self._root_type
 
+    def verify_ast(self, node, expected_type=None, field_path=()):
+        # type: (ASTWrapper, Node, Optional[str], Tuple[str, ...]) -> None
+        # pylint: disable=too-many-branches
+        '''Checks that `node` conforms to the current ASDL.'''
+        if node is None:
+            raise ValueError('node is None. path: {}'.format(field_path))
+        if not isinstance(node, dict):
+            raise ValueError('node is type {}. path: {}'.format(
+                type(node), field_path))
+
+        node_type = node['_type']  # type: str
+        if expected_type is not None:
+            sum_product = self.types[expected_type]
+            if isinstance(sum_product, asdl.Product):
+                if node_type != expected_type:
+                    raise ValueError(
+                        'Expected type {}, but instead saw {}. path: {}'.format(
+                            expected_type, node_type, field_path))
+            elif isinstance(sum_product, asdl.Sum):
+                possible_names = [t.name
+                                  for t in sum_product.types]  # type: List[str]
+                if node_type not in possible_names:
+                    raise ValueError(
+                        'Expected one of {}, but instead saw {}. path: {}'.format(
+                            ', '.join(possible_names), node_type, field_path))
+
+            else:
+                raise ValueError('Unexpected type in ASDL: {}'.format(sum_product))
+
+        if node_type in self.types:
+            # Either a product or a sum type; we want it to be a product type
+            sum_product = self.types[node_type]
+            if isinstance(sum_product, asdl.Sum):
+                raise ValueError('sum type {} not allowed as node type. path: {}'.
+                                 format(node_type, field_path))
+            fields_to_check = sum_product.fields
+        elif node_type in self.constructors:
+            fields_to_check = self.constructors[node_type].fields
+        else:
+            raise ValueError('Unknown node_type {}. path: {}'.format(node_type,
+                                                                     field_path))
+
+        for field in fields_to_check:
+            if not field.opt and not field.seq and (field.name not in node or
+                                                    node[field.name] is None):
+                raise ValueError('required field {} is missing. path: {}'.format(
+                    field.name, field_path))
+            if field.seq and field.name in node and not isinstance(
+                    node[field.name], (list, tuple)):  # noqa: E125
+                raise ValueError('sequential field {} is not sequence. path: {}'.
+                                 format(field.name, field_path))
+
+            # Check that each item in this field has the expected type.
+            items = node.get(field.name,
+                             ()) if field.seq else (node.get(field.name), )
+            item_type = {
+                'identifier': lambda x: isinstance(x, str),
+                'int': lambda x: isinstance(x, int),
+                'string': lambda x: isinstance(x, str),
+                'bytes': lambda x: isinstance(x, bytes),
+                'object': lambda x: isinstance(x, object),
+                'singleton': lambda x: x is True or x is False or x is None
+            }
+
+            # pylint: disable=cell-var-from-loop
+            if field.type in item_type:
+                check = item_type[field.type]
+            else:
+                # pylint: disable=line-too-long
+                check = lambda n: self.verify_ast(n, field.type, field_path + (field.name, ))  # noqa: E731,E501
+
+            for item in items:
+                if item is None:
+                    continue
+                check(item)
 
 # Improve this when mypy supports recursive types.
 Node = Dict[str, Any]
-
-
-def verify_ast(ast_def, node, expected_type=None, field_path=()):
-    # type: (ASTWrapper, Node, Optional[str], Tuple[str, ...]) -> None
-    # pylint: disable=too-many-branches
-    '''Checks that `node` conforms to the ASDL provided in `ast_def`.'''
-    if node is None:
-        raise ValueError('node is None. path: {}'.format(field_path))
-    if not isinstance(node, dict):
-        raise ValueError('node is type {}. path: {}'.format(
-            type(node), field_path))
-
-    node_type = node['_type']  # type: str
-    if expected_type is not None:
-        sum_product = ast_def.types[expected_type]
-        if isinstance(sum_product, asdl.Product):
-            if node_type != expected_type:
-                raise ValueError(
-                    'Expected type {}, but instead saw {}. path: {}'.format(
-                        expected_type, node_type, field_path))
-        elif isinstance(sum_product, asdl.Sum):
-            possible_names = [t.name
-                              for t in sum_product.types]  # type: List[str]
-            if node_type not in possible_names:
-                raise ValueError(
-                    'Expected one of {}, but instead saw {}. path: {}'.format(
-                        ', '.join(possible_names), node_type, field_path))
-
-        else:
-            raise ValueError('Unexpected type in ASDL: {}'.format(sum_product))
-
-    if node_type in ast_def.types:
-        # Either a product or a sum type; we want it to be a product type
-        sum_product = ast_def.types[node_type]
-        if isinstance(sum_product, asdl.Sum):
-            raise ValueError('sum type {} not allowed as node type. path: {}'.
-                             format(node_type, field_path))
-        fields_to_check = sum_product.fields
-    elif node_type in ast_def.constructors:
-        fields_to_check = ast_def.constructors[node_type].fields
-    else:
-        raise ValueError('Unknown node_type {}. path: {}'.format(node_type,
-                                                                 field_path))
-
-    for field in fields_to_check:
-        if not field.opt and not field.seq and (field.name not in node or
-                                                node[field.name] is None):
-            raise ValueError('required field {} is missing. path: {}'.format(
-                field.name, field_path))
-        if field.seq and field.name in node and not isinstance(
-                node[field.name], (list, tuple)):  # noqa: E125
-            raise ValueError('sequential field {} is not sequence. path: {}'.
-                             format(field.name, field_path))
-
-        # Check that each item in this field has the expected type.
-        items = node.get(field.name,
-                         ()) if field.seq else (node.get(field.name), )
-        item_type = {
-            'identifier': lambda x: isinstance(x, str),
-            'int': lambda x: isinstance(x, int),
-            'string': lambda x: isinstance(x, str),
-            'bytes': lambda x: isinstance(x, bytes),
-            'object': lambda x: isinstance(x, object),
-            'singleton': lambda x: x is True or x is False or x is None
-        }
-
-        # pylint: disable=cell-var-from-loop
-        if field.type in item_type:
-            check = item_type[field.type]
-        else:
-            # pylint: disable=line-too-long
-            check = lambda n: verify_ast(ast_def, n, field.type, field_path + (field.name, ))  # noqa: E731,E501
-
-        for item in items:
-            if item is None:
-                continue
-            check(item)
 
 
 PYTHON_AST_FIELD_BLACKLIST = {
