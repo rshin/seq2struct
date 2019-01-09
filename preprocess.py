@@ -3,6 +3,7 @@ import json
 import os
 
 import _jsonnet
+import tqdm
 
 import seq2struct
 from seq2struct.utils import registry
@@ -24,7 +25,7 @@ def main():
     val_data = registry.construct('dataset', config['data']['val'])
 
     for section, data in (('train', train_data), ('val', val_data)):
-        for item in data:
+        for item in tqdm.tqdm(data, desc=section, dynamic_ncols=True):
             to_add, validation_info = model_preproc.validate_item(item, section)
             if to_add:
                 model_preproc.add_item(item, section, validation_info)
