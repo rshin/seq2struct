@@ -162,10 +162,17 @@ class ASTWrapper(object):
                                                                      field_path))
 
         for field in fields_to_check:
-            if not field.opt and not field.seq and (field.name not in node or
-                                                    node[field.name] is None):
+            # field.opt:
+            # - missing is okay
+            # field.seq
+            # - missing is okay
+            # - otherwise, must be list
+            if field.name not in node:
+                if field.opt or field.seq:
+                    continue
                 raise ValueError('required field {} is missing. path: {}'.format(
                     field.name, field_path))
+
             if field.seq and field.name in node and not isinstance(
                     node[field.name], (list, tuple)):  # noqa: E125
                 raise ValueError('sequential field {} is not sequence. path: {}'.
@@ -191,8 +198,6 @@ class ASTWrapper(object):
                 check = lambda n: self.verify_ast(n, field.type, field_path + (field.name, ))  # noqa: E731,E501
 
             for item in items:
-                if item is None:
-                    continue
                 check(item)
 
 # Improve this when mypy supports recursive types.

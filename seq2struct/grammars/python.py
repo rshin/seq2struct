@@ -40,22 +40,6 @@ def split_string_whitespace_and_camelcase(s):
     return result[:-1]
 
 
-def convert_native_ast(node):
-    # type: (ast.AST) -> Dict[str, Any]
-    node_type = node.__class__.__name__
-    result = {'_type': node_type}  # type: Dict[str, Any]
-    for field, value in ast.iter_fields(node):
-        if field in PYTHON_AST_FIELD_BLACKLIST.get(node_type, set()):
-            continue
-        if isinstance(value, (list, tuple)):
-            result[field] = [convert_native_ast(v) for v in value]
-        elif not isinstance(value, ast.AST):
-            result[field] = value
-        else:
-            result[field] = convert_native_ast(value)
-    return result
-
-
 def to_native_ast(node):
     if isinstance(node, (list, tuple)):
         return [to_native_ast(item) for item in node]
@@ -80,7 +64,7 @@ class PythonGrammar:
     def parse(cls, code):
         try:
             py_ast = ast.parse(code)
-            return convert_native_ast(py_ast)
+            return cls.convert_native_ast(py_ast)
         except SyntaxError:
             return  None
 
@@ -88,7 +72,7 @@ class PythonGrammar:
     def unparse(cls, tree):
         ast_tree = to_native_ast(tree)
         return astor.to_source(ast_tree)
- 
+
     @classmethod
     def tokenize_field_value(cls, field_value):
         if isinstance(field_value, bytes):
@@ -96,3 +80,28 @@ class PythonGrammar:
         else:
             field_value = str(field_value)
         return split_string_whitespace_and_camelcase(field_value)
+
+    @classmethod
+    def convert_native_ast(cls, node):
+        # type: (ast.AST) -> Dict[str, Any]
+        node_type = node.__class__.__name__
+        field_infos = {
+            f.name: f
+            for f in cls.ast_wrapper.singular_types[node_type].fields
+        }
+        result = {'_type': node_type}  # type: Dict[str, Any]
+        for field, value in ast.iter_fields(node):
+            if field in PYTHON_AST_FIELD_BLACKLIST.get(node_type, set()):
+                continue
+            field_info = field_infos[field]
+            if field_info.opt and value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                assert field_info.seq
+                if value:
+                    result[field] = [cls.convert_native_ast(v) for v in value]
+            elif not isinstance(value, ast.AST):
+                result[field] = value
+            else:
+                result[field] = cls.convert_native_ast(value)
+        return result

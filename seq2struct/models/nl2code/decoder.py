@@ -108,6 +108,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
     def validate_item(self, item, section):
         parsed = self.grammar.parse(item.code)
         if parsed:
+            self.ast_wrapper.verify_ast(parsed)
             return True, parsed
         return section != 'train', None
 
@@ -201,14 +202,14 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
                     self.ast_wrapper.singular_types[node_type].fields)
             self.field_presence_infos[node_type].add(field_presence_info)
 
-            # Rules of the form:
-            # stmt* -> stmt
-            #        | stmt stmt
-            #        | stmt stmt stmt
             for field_info in self.ast_wrapper.singular_types[node_type].fields:
-                field_value = node.get(field_info.name)
+                field_value = node.get(field_info.name, [] if field_info.seq else None)
                 to_enqueue = []
                 if field_info.seq:
+                    # Rules of the form:
+                    # stmt* -> stmt
+                    #        | stmt stmt
+                    #        | stmt stmt stmt
                     self.seq_lengths[field_info.type + '*'].add(len(field_value))
                     to_enqueue = field_value
                 else:
@@ -275,7 +276,6 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
                     queue.extend(field_value)
                 elif field_value is not None:
                     queue.append(field_value)
-
 
 
 @attr.s
