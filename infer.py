@@ -1,7 +1,6 @@
 import argparse
 import ast
 import collections
-import copy
 import datetime
 import itertools
 import json
@@ -81,8 +80,7 @@ def main():
             model_output, inferred_code = beam.inference_state.finalize()
 
             decoded.append({
-                # TODO remove deepcopy
-                'model_output': copy.deepcopy(model_output),
+                'model_output': model_output,
                 'inferred_code': inferred_code,
                 'score': beam.score,
                 'choice_history': beam.choice_history,

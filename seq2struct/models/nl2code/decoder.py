@@ -816,7 +816,7 @@ class TreeTraversal:
     @attr.s(frozen=True)
     class SetParentField(TreeAction):
         parent_field_name = attr.ib()
-        value = attr.ib()
+        node_type = attr.ib()
     
     @attr.s(frozen=True)
     class CreateParentFieldList(TreeAction):
@@ -920,7 +920,7 @@ class TreeTraversal:
             elif self.cur_item.state == CHILDREN_INQUIRE:
                 self.actions = self.actions.append(
                     TreeTraversal.SetParentField(
-                        self.cur_item.parent_field_name, {'_type': self.cur_item.node_type}))
+                        self.cur_item.parent_field_name,  self.cur_item.node_type))
 
                 # Check if we have no children
                 type_info = self.model.ast_wrapper.singular_types[self.cur_item.node_type]
@@ -1039,7 +1039,6 @@ class TreeTraversal:
                         parent_field_name=self.cur_item.parent_field_name,
                     ))
                 self.actions = self.actions.append(TreeTraversal.CreateParentFieldList(self.cur_item.parent_field_name))
-                #self.actions = self.actions.append(TreeTraversal.SetParentField(self.cur_item.parent_field_name, []))
 
                 advanced = self.pop()
                 assert advanced
@@ -1117,21 +1116,22 @@ class TreeTraversal:
         stack = []
         for i, action in enumerate(self.actions):
             if isinstance(action, TreeTraversal.SetParentField):
+                new_node = {'_type': action.node_type}
                 if action.parent_field_name is None:
+                    # Initial node in tree.
                     assert root is None
-                    root = current = action.value
+                    root = current = new_node
                     stack.append(root)
                     continue
 
                 existing_list = current.get(action.parent_field_name)
-                value = dict(action.value)
                 if existing_list is None:
-                    current[action.parent_field_name] = value
+                    current[action.parent_field_name] = new_node
                 else:
                     assert isinstance(existing_list, list)
-                    current[action.parent_field_name].append(value)
+                    current[action.parent_field_name].append(new_node)
                 stack.append(current)
-                current = value
+                current = new_node
 
             elif isinstance(action, TreeTraversal.CreateParentFieldList):
                 current[action.parent_field_name] = []
