@@ -7,7 +7,6 @@ import attr
 import nltk
 import torch.utils.data
 
-from seq2struct import ast_util
 from seq2struct.utils import registry
 from seq2struct.utils import indexed_file
 
@@ -21,13 +20,13 @@ class HearthstoneItem:
 
 @registry.register('dataset', 'hearthstone')
 class HearthstoneDataset(torch.utils.data.Dataset): 
-    def __init__(self, filename, limit=None):
-        self.filename = filename
+    def __init__(self, path, limit=None):
+        self.path = path
         self.examples = []
         for example in itertools.islice(
                 zip(
-                    open(self.filename + '.in'),
-                    open(self.filename + '.out')),
+                    open(self.path + '.in'),
+                    open(self.path + '.out')),
                 limit):
             processed = self._process(example)
             if processed is not None:
@@ -43,25 +42,6 @@ class HearthstoneDataset(torch.utils.data.Dataset):
         text, code = example
 
         code = '\n'.join(code.split(LINE_SEP))
-
-        # TODO move to NL2CodeDecoderPreproc.validate_item
-        try:
-            py_ast = ast.parse(code)
-        except SyntaxError:
-            return None
-        node = ast_util.convert_native_ast(py_ast)
-
-        #gold_source = astor.to_source(gold_ast_tree)
-        #ast_tree = parse_tree_to_python_ast(parse_tree)
-        #pred_source = astor.to_source(ast_tree)
-
-        #parse_tree = parse_raw(code)
-        #gold_ast_tree = ast.parse(code).body[0]
-        #gold_source = astor.to_source(gold_ast_tree)
-        #ast_tree = parse_tree_to_python_ast(parse_tree)
-        #pred_source = astor.to_source(ast_tree)
-
-        #assert gold_source == pred_source, 'sanity check fails: gold=[%s], actual=[%s]' % (gold_source, pred_source)
 
         # Remove HTML tags
         text = re.sub(r'<.*?>', '', text)

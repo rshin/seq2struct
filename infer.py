@@ -69,7 +69,6 @@ def main():
     last_step = saver.restore(args.logdir)
 
     # 3. Get training data somewhere
-    # TODO don't assume EncDecModel, Hearthstone
     output = open(args.output, 'w')
 
     data = model_preproc.dataset(args.section)
@@ -79,24 +78,19 @@ def main():
 
         decoded = []
         for beam in beams:
-            try:
-                tree = beam.inference_state.finalize()
-                ast_tree = ast_util.to_native_ast(tree)
-                inferred_code = astor.to_source(ast_tree)
-            except Exception as e:
-                tree = {'_error': str(e)}
-                inferred_code = 'ERROR'
+            model_output, inferred_code = beam.inference_state.finalize()
 
-            enc_input, dec_output = item
             decoded.append({
                 # TODO remove deepcopy
-                'tree': copy.deepcopy(tree),
+                'model_output': copy.deepcopy(model_output),
                 'inferred_code': inferred_code,
                 'score': beam.score,
                 'choice_history': beam.choice_history,
                 'score_history': beam.score_history,
             })
 
+        # TODO don't assume EncDecModel, Hearthstone
+        enc_input, dec_output = item
         canonicalized_gold_code = astor.to_source(
             ast.parse(dec_output.orig_code))
         output.write(

@@ -27,17 +27,6 @@ def lstm_init(device, num_layers, hidden_size, *batch_sizes):
     return (init, init)
 
 
-def split_string_whitespace_and_camelcase(s):
-    split_space = s.split(' ')
-    result = []
-    for token in split_space:
-        if token: # \uE012 is an arbitrary glue character, from the Private Use Area.
-            camelcase_split_token = re.sub('([a-z])([A-Z])', '\\1\uE012\\2', token).split('\uE012')
-            result.extend(camelcase_split_token)
-        result.append(' ')
-    return result[:-1]
-
-
 def maybe_stack(items, dim=None):
     to_stack = [item for item in items if item is not None]
     if not to_stack:
@@ -48,8 +37,8 @@ def maybe_stack(items, dim=None):
         return torch.stack(to_stack, dim)
 
 
-def to_dict_with_sorted_values(d):
-    return {k: sorted(v) for k, v in d.items()}
+def to_dict_with_sorted_values(d, key=None):
+    return {k: sorted(v, key=key) for k, v in d.items()}
 
 
 def to_dict_with_set_values(d):
@@ -91,16 +80,13 @@ class NL2CodeDecoderPreprocItem:
 class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
     def __init__(
             self,
+            grammar,
             save_path,
             min_freq=3,
             max_count=5000):
-        # TODO: don't hardcode Python.asdl
-        self.ast_wrapper = ast_util.ASTWrapper(
-                asdl.parse(
-                    os.path.join(
-                        os.path.dirname(os.path.abspath(__file__)),
-                        '..', '..',
-                        'Python.asdl')))
+
+        self.grammar = registry.construct('grammar', grammar)
+        self.ast_wrapper = self.grammar.ast_wrapper
 
         self.vocab_path = os.path.join(save_path, 'dec_vocab.json')
         self.observed_productions_path = os.path.join(save_path, 'observed_productions.json')
@@ -120,12 +106,10 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.rules_mask = None
 
     def validate_item(self, item, section):
-        try:
-            py_ast = ast.parse(item.code)
-            root = ast_util.convert_native_ast(py_ast)
-        except SyntaxError:
-            return section != 'train', None
-        return True, root
+        parsed = self.grammar.parse(item.code)
+        if parsed:
+            return True, parsed
+        return section != 'train', None
 
     def add_item(self, item, section, validation_info):
         root = validation_info
@@ -153,7 +137,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.sum_type_constructors = to_dict_with_sorted_values(
             self.sum_type_constructors)
         self.field_presence_infos = to_dict_with_sorted_values(
-            self.field_presence_infos)
+            self.field_presence_infos, key=str)
         self.seq_lengths = to_dict_with_sorted_values(
             self.seq_lengths)
         self.primitive_types = sorted(self.primitive_types)
@@ -285,19 +269,13 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             for field_info in reversed(type_info.fields):
                 field_value = node.get(field_info.name)
                 if field_info.type in asdl.builtin_types:
-                    for token in self._tokenize_field_value(field_value):
+                    for token in self.grammar.tokenize_field_value(field_value):
                         yield token
                 elif isinstance(field_value, (list, tuple)):
                     queue.extend(field_value)
                 elif field_value is not None:
                     queue.append(field_value)
 
-    def _tokenize_field_value(self, field_value):
-        if isinstance(field_value, bytes):
-            field_value = field_value.encode('latin1')
-        else:
-            field_value = str(field_value)
-        return split_string_whitespace_and_camelcase(field_value)
 
 
 @attr.s
@@ -480,7 +458,7 @@ class NL2CodeDecoder(torch.nn.Module):
                 # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
                 # - at decoding time, cast back to str/int/float/bool
                 field_type = type(node).__name__
-                field_value_split = self.preproc._tokenize_field_value(node) + [
+                field_value_split = self.preproc.grammar.tokenize_field_value(node) + [
                         vocab.EOS]
 
                 for token in field_value_split:
@@ -1192,4 +1170,4 @@ class TreeTraversal:
                 raise ValueError(action)
 
         assert not stack
-        return root
+        return root, self.model.preproc.grammar.unparse(root)

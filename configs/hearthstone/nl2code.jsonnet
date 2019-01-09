@@ -1,12 +1,13 @@
+local PREFIX = 'data/hearthstone/';
 {
     data: {
         train: {
             name: 'hearthstone', 
-            filename: 'data/hearthstone/train_hs'
+            path: PREFIX + 'train_hs',
         },
         val: {
             name: 'hearthstone', 
-            filename: 'data/hearthstone/dev_hs'
+            path: PREFIX + 'dev_hs',
         },
     },
 
@@ -21,11 +22,15 @@
             dropout: 0.2,
         },
         encoder_preproc: {
-            save_path: 'data/hearthstone/nl2code/',
+            save_path: PREFIX + 'nl2code/',
             min_freq: 3,
             max_count: 5000,
         },
-        decoder_preproc: self.encoder_preproc,
+        decoder_preproc: self.encoder_preproc {
+            grammar: {
+                name: 'python',
+            },
+        },
     },
 
     train: {
@@ -46,5 +51,4 @@
         rho: 0.95,
         eps: 1e-6,
     },
-
 }
