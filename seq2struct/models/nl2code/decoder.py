@@ -550,7 +550,7 @@ class NL2CodeDecoder(torch.nn.Module):
         return torch.sum(torch.stack(loss, dim=0), dim=0)
     
     def begin_inference(self, desc_enc):
-        traversal = TreeTraversal(self, desc_enc)
+        traversal = InferenceTreeTraversal(self, desc_enc)
         choices = traversal.step(None)
         return traversal, choices
 
@@ -809,32 +809,6 @@ class TreeTraversal:
     class PrevActionTypes(enum.Enum):
         APPLY_RULE = 0
         GEN_TOKEN = 1
-
-    class TreeAction:
-        pass
-    
-    @attr.s(frozen=True)
-    class SetParentField(TreeAction):
-        parent_field_name = attr.ib()
-        node_type = attr.ib()
-    
-    @attr.s(frozen=True)
-    class CreateParentFieldList(TreeAction):
-        parent_field_name = attr.ib()
-
-    @attr.s(frozen=True)
-    class AppendTerminalToken(TreeAction):
-        parent_field_name = attr.ib()
-        value = attr.ib()
-
-    @attr.s(frozen=True)
-    class FinalizeTerminal(TreeAction):
-        parent_field_name = attr.ib()
-        terminal_type = attr.ib()
-    
-    @attr.s(frozen=True)
-    class NodeFinished(TreeAction):
-        pass
     
     def __init__(self, model, desc_enc):
         if model is None:
@@ -850,16 +824,15 @@ class TreeTraversal:
         self.queue = pyrsistent.pvector()
         self.cur_item = TreeTraversal.QueueItem(
                 state=TreeTraversal.State.CHILDREN_INQUIRE,
-                node_type='Module',
+                node_type=model.preproc.grammar.root_type,
                 parent_action_emb=self.model.zero_rule_emb,
                 parent_h=self.model.zero_recurrent_emb,
                 parent_field_name=None)
 
-        self.actions = pyrsistent.pvector()
         self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
 
     def clone(self):
-        other = TreeTraversal(None, None)
+        other = self.__class__(None, None)
         other.model = self.model
         other.desc_enc = self.desc_enc
         other.recurrent_state = self.recurrent_state
@@ -869,7 +842,7 @@ class TreeTraversal:
         other.actions = self.actions
         other.update_prev_action_emb_type = self.update_prev_action_emb_type
         return other
-    
+
     def step(self, last_choice):
         SUM_TYPE_INQUIRE    = TreeTraversal.State.SUM_TYPE_INQUIRE
         SUM_TYPE_APPLY      = TreeTraversal.State.SUM_TYPE_APPLY
@@ -880,10 +853,9 @@ class TreeTraversal:
         GEN_TOKEN           = TreeTraversal.State.GEN_TOKEN
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
-        if last_choice is not None:
-            self.update_prev_action_emb(last_choice)
-
         while True:
+            self.update_using_last_choice(last_choice)
+
             # 1. ApplyRule, like expr -> Call
             if self.cur_item.state == SUM_TYPE_INQUIRE:
                 # a. Ask which one to choose
@@ -918,14 +890,9 @@ class TreeTraversal:
 
             # 2. ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
             elif self.cur_item.state == CHILDREN_INQUIRE:
-                self.actions = self.actions.append(
-                    TreeTraversal.SetParentField(
-                        self.cur_item.parent_field_name,  self.cur_item.node_type))
-
                 # Check if we have no children
                 type_info = self.model.ast_wrapper.singular_types[self.cur_item.node_type]
                 if not type_info.fields:
-                    self.actions = self.actions.append(TreeTraversal.NodeFinished())
                     if self.pop():
                         last_choice = None
                         continue
@@ -1038,7 +1005,6 @@ class TreeTraversal:
                         parent_h=self.cur_item.parent_h,
                         parent_field_name=self.cur_item.parent_field_name,
                     ))
-                self.actions = self.actions.append(TreeTraversal.CreateParentFieldList(self.cur_item.parent_field_name))
 
                 advanced = self.pop()
                 assert advanced
@@ -1047,18 +1013,11 @@ class TreeTraversal:
 
             elif self.cur_item.state == GEN_TOKEN:
                 if last_choice == vocab.EOS:
-                    self.actions = self.actions.append(TreeTraversal.FinalizeTerminal(
-                        self.cur_item.parent_field_name,
-                        self.cur_item.node_type))
                     if self.pop():
                         last_choice = None
                         continue
                     else:
                         return None
-                elif last_choice is not None:
-                    self.actions = self.actions.append(TreeTraversal.AppendTerminalToken(
-                        self.cur_item.parent_field_name,
-                        last_choice))
 
                 self.recurrent_state, output, gen_logodds = self.model.gen_token(
                         self.cur_item.node_type,
@@ -1073,7 +1032,6 @@ class TreeTraversal:
                 return log_probs_by_word
 
             elif self.cur_item.state == NODE_FINISHED:
-                self.actions = self.actions.append(TreeTraversal.NodeFinished())
                 if self.pop():
                     last_choice = None
                     continue
@@ -1083,7 +1041,9 @@ class TreeTraversal:
             else:
                 raise ValueError('Unknown state {}'.format(self.cur_item.state))
     
-    def update_prev_action_emb(self, last_choice):
+    def update_using_last_choice(self, last_choice):
+        if last_choice is None:
+            return
         if self.update_prev_action_emb_type == TreeTraversal.PrevActionTypes.APPLY_RULE:
             # rule_idx shape: batch (=1)
             rule_idx = self.model._tensor([last_choice])
@@ -1104,6 +1064,34 @@ class TreeTraversal:
            return True
         return False
 
+
+class InferenceTreeTraversal(TreeTraversal):
+    class TreeAction:
+        pass
+
+    @attr.s(frozen=True)
+    class SetParentField(TreeAction):
+        parent_field_name = attr.ib()
+        node_type = attr.ib()
+
+    @attr.s(frozen=True)
+    class CreateParentFieldList(TreeAction):
+        parent_field_name = attr.ib()
+
+    @attr.s(frozen=True)
+    class AppendTerminalToken(TreeAction):
+        parent_field_name = attr.ib()
+        value = attr.ib()
+
+    @attr.s(frozen=True)
+    class FinalizeTerminal(TreeAction):
+        parent_field_name = attr.ib()
+        terminal_type = attr.ib()
+
+    @attr.s(frozen=True)
+    class NodeFinished(TreeAction):
+        pass
+
     SIMPLE_TERMINAL_TYPES = {
         'str': str,
         'int': int,
@@ -1111,11 +1099,53 @@ class TreeTraversal:
         'bool': bool,
     }
 
+    def __init__(self, model, desc_enc):
+        super().__init__(model, desc_enc)
+        self.actions = pyrsistent.pvector()
+
+    def clone(self):
+        super_clone = super().clone()
+        super_clone.actions = self.actions
+        return super_clone
+
+    def update_using_last_choice(self, last_choice):
+        super().update_using_last_choice(last_choice)
+
+        # Record actions
+        # CHILDREN_INQUIRE
+        if self.cur_item.state == TreeTraversal.State.CHILDREN_INQUIRE:
+            self.actions = self.actions.append(
+                self.SetParentField(
+                    self.cur_item.parent_field_name,  self.cur_item.node_type))
+            type_info = self.model.ast_wrapper.singular_types[self.cur_item.node_type]
+            if not type_info.fields:
+                self.actions = self.actions.append(self.NodeFinished())
+
+        # LIST_LENGTH_APPLY
+        elif self.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY:
+            self.actions = self.actions.append(self.CreateParentFieldList(self.cur_item.parent_field_name))
+
+        # GEN_TOKEN
+        elif self.cur_item.state == TreeTraversal.State.GEN_TOKEN:
+            if last_choice == vocab.EOS:
+                self.actions = self.actions.append(self.FinalizeTerminal(
+                    self.cur_item.parent_field_name,
+                    self.cur_item.node_type))
+            elif last_choice is not None:
+                self.actions = self.actions.append(self.AppendTerminalToken(
+                    self.cur_item.parent_field_name,
+                    last_choice))
+
+        # NODE_FINISHED
+        elif self.cur_item.state == TreeTraversal.State.NODE_FINISHED:
+            self.actions = self.actions.append(self.NodeFinished())
+
+
     def finalize(self):
         root = current = None
         stack = []
         for i, action in enumerate(self.actions):
-            if isinstance(action, TreeTraversal.SetParentField):
+            if isinstance(action, self.SetParentField):
                 new_node = {'_type': action.node_type}
                 if action.parent_field_name is None:
                     # Initial node in tree.
@@ -1133,18 +1163,18 @@ class TreeTraversal:
                 stack.append(current)
                 current = new_node
 
-            elif isinstance(action, TreeTraversal.CreateParentFieldList):
+            elif isinstance(action, self.CreateParentFieldList):
                 current[action.parent_field_name] = []
 
-            elif isinstance(action, TreeTraversal.AppendTerminalToken):
+            elif isinstance(action, self.AppendTerminalToken):
                 tokens = current.get(action.parent_field_name)
                 if tokens is None:
                     tokens = current[action.parent_field_name] = []
                 tokens.append(action.value)
 
-            elif isinstance(action, TreeTraversal.FinalizeTerminal):
+            elif isinstance(action, self.FinalizeTerminal):
                 terminal = ''.join(current.get(action.parent_field_name, []))
-                constructor = TreeTraversal.SIMPLE_TERMINAL_TYPES.get(action.terminal_type)
+                constructor = self.SIMPLE_TERMINAL_TYPES.get(action.terminal_type)
                 if constructor:
                     value = constructor(terminal)
                 elif action.terminal_type == 'bytes':
@@ -1155,7 +1185,7 @@ class TreeTraversal:
                     raise ValueError('Unknown terminal type: {}'.format(action.terminal_type))
                 current[action.parent_field_name] = value
 
-            elif isinstance(action, TreeTraversal.NodeFinished):
+            elif isinstance(action, self.NodeFinished):
                 # Add any missing fields
                 type_info = self.model.preproc.ast_wrapper.singular_types[current['_type']]
                 for field_info in type_info.fields:
