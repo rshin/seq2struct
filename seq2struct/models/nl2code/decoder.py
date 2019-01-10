@@ -281,10 +281,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
 @attr.s
 class TreeState:
     node = attr.ib()
-    parent_action_emb = attr.ib()
-    parent_h = attr.ib()
     parent_field_type = attr.ib()
-    debug_path = attr.ib()
 
 
 @registry.register('decoder', 'NL2Code')
@@ -415,41 +412,18 @@ class NL2CodeDecoder(torch.nn.Module):
         return all_rules, rules_mask
 
     def compute_loss(self, example, desc_enc):
-        # - field is required, singular, sum type
-        #   choose among the possibilities afforded by the sum type
-        # - field is required, singular, primitive type
-        #   Use GenToken
-        # - field is repeated
-        #   Original NL2Code:
-        #     The number of children is decided ahead of time.
-        #     E.g. there would be rules like
-        #       expr* -> expr
-        #       expr* -> expr expr
-        #       expr* -> expr expr expr
-        # - field is optional and it's missing
-        #   Original NL2Code:
-        #     This never happens because all missing fields are
-        #     omitted from the node.
-        self.state_update.set_dropout_masks(batch_size=1)
-        state = lstm_init(self._device, None, self.recurrent_size, 1)
-        prev_action_emb = self.zero_rule_emb
+        traversal = TrainTreeTraversal(self, desc_enc)
+        traversal.step(None)
 
-        loss = []
-
-        # Perform a DFS
         queue = [
             TreeState(
                 node=example.tree,
-                parent_action_emb=self.zero_rule_emb,
-                parent_h=self.zero_recurrent_emb,
                 parent_field_type=None,
-                debug_path=example.tree['_type'])
+            )
         ]
         while queue:
             item = queue.pop()
             node = item.node
-            parent_action_emb = item.parent_action_emb
-            parent_h = item.parent_h
             parent_field_type = item.parent_field_type
 
             if parent_field_type in asdl.builtin_types:
@@ -462,39 +436,21 @@ class NL2CodeDecoder(torch.nn.Module):
                         vocab.EOS]
 
                 for token in field_value_split:
-                    state, prev_action_emb, loss_piece = self.gen_token_loss(
-                            field_type,
-                            token,
-                            state,
-                            prev_action_emb,
-                            parent_h, 
-                            parent_action_emb,
-                            desc_enc)
-                    loss.append(loss_piece)
+                    traversal.step(token)
                 continue
- 
+
             if isinstance(node, (list, tuple)):
-                # parent_field_type* -> [parent_field_type] * len(list)
                 node_type = parent_field_type + '*'
                 rule = (node_type, len(node))
-                output, state, prev_action_emb, loss_piece = self.apply_rule_loss(
-                        node_type,
-                        rule,
-                        state,
-                        prev_action_emb,
-                        parent_h, 
-                        parent_action_emb,
-                        desc_enc)
-                loss.append(loss_piece)
+                rule_idx = self.rules_index[rule]
+                traversal.step(rule_idx)
 
                 for i, elem in reversed(list(enumerate(node))):
                     queue.append(
                         TreeState(
                             node=elem,
-                            parent_action_emb=prev_action_emb,
-                            parent_h=output,
                             parent_field_type=parent_field_type,
-                            debug_path=item.debug_path + '[{}]'.format(i)))
+                        ))
                 continue
 
             type_info = self.ast_wrapper.singular_types[node['_type']]
@@ -502,53 +458,29 @@ class NL2CodeDecoder(torch.nn.Module):
             if parent_field_type in self.ast_wrapper.sum_types:
                 # ApplyRule, like expr -> Call
                 rule = (parent_field_type, type_info.name)
-                output, state, prev_action_emb, loss_piece = self.apply_rule_loss(
-                        parent_field_type,
-                        rule,
-                        state,
-                        prev_action_emb,
-                        parent_h, 
-                        parent_action_emb,
-                        desc_enc)
-
-                parent_h = output
-                parent_action_emb = prev_action_emb
-                loss.append(loss_piece)
+                rule_idx = self.rules_index[rule]
+                traversal.step(rule_idx)
 
             if type_info.fields:
                 # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
                 # Figure out which rule needs to be applied
                 present = get_field_presence_info(node, type_info.fields)
-                # TODO: put type name in type_info for product types
                 rule = (node['_type'], tuple(present))
-                output, state, prev_action_emb, loss_piece = self.apply_rule_loss(
-                        node['_type'],
-                        rule,
-                        state,
-                        prev_action_emb,
-                        parent_h,
-                        parent_action_emb,
-                        desc_enc)
-                loss.append(loss_piece)
+                rule_idx = self.rules_index[rule]
+                traversal.step(rule_idx)
 
             # reversed so that we perform a DFS in left-to-right order
             for field_info in reversed(type_info.fields):
-                field_value = node.get(field_info.name)
-                if field_info.type not in asdl.builtin_types:
-                    if field_value is None or field_value == []:
-                        continue
-
+                if field_info.name not in node:
+                    continue
                 queue.append(
                     TreeState(
-                        node=field_value,
-                        parent_action_emb=prev_action_emb,
-                        parent_h=output,
-                        # "identifier" for example
+                        node=node[field_info.name],
                         parent_field_type=field_info.type,
-                        debug_path='{} -> {}'.format(item.debug_path, field_info.name)))
+                    ))
 
-        return torch.sum(torch.stack(loss, dim=0), dim=0)
-    
+        return torch.sum(torch.stack(tuple(traversal.loss), dim=0), dim=0)
+
     def begin_inference(self, desc_enc):
         traversal = InferenceTreeTraversal(self, desc_enc)
         choices = traversal.step(None)
@@ -599,7 +531,7 @@ class NL2CodeDecoder(torch.nn.Module):
         rule_logits = self.rule_logits(output)
 
         return output, new_state, rule_logits
-    
+
     def rule_infer(self, node_type, rule_logits):
         rule_logprobs = torch.nn.functional.log_softmax(rule_logits, dim=-1)
         rules_start, rules_end = self.preproc.rules_mask[node_type]
@@ -609,25 +541,14 @@ class NL2CodeDecoder(torch.nn.Module):
             range(rules_start, rules_end),
             rule_logprobs[0, rules_start:rules_end]))
 
-    def apply_rule_loss(
-            self,
-            node_type,
-            rule,
-            prev_state,
-            prev_action_emb,
-            parent_h,
-            parent_action_emb,
-            desc_enc):
-        output, new_state, rule_logits = self.apply_rule(
-                node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
-
+    def apply_rule_loss(self, rule_logits, rule_idx):
         # rule_idx shape: batch (=1)
-        rule_idx = self._tensor([self.rules_index[rule]])
+        rule_idx = self._tensor([rule_idx])
         # action_emb shape: batch (=1) x emb_size
         action_emb = self.rule_embedding(rule_idx)
         # loss_piece shape: batch (=1)
         loss_piece = self.xent_loss(rule_logits, rule_idx)
-        return output, new_state, action_emb, loss_piece
+        return loss_piece
     
     def gen_token(
             self,
@@ -665,16 +586,10 @@ class NL2CodeDecoder(torch.nn.Module):
     
     def gen_token_loss(
             self,
-            node_type,
+            output,
+            gen_logodds,
             token,
-            prev_state,
-            prev_action_emb,
-            parent_h,
-            parent_action_emb,
             desc_enc):
-        new_state, output, gen_logodds = self.gen_token(
-            node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
-
         # token_idx shape: batch (=1), LongTensor
         token_idx = self._index(self.terminal_vocab, token)
         # action_emb shape: batch (=1) x emb_size
@@ -719,8 +634,7 @@ class NL2CodeDecoder(torch.nn.Module):
         loss_piece = -torch.logsumexp(
             maybe_stack([copy_logprob, gen_logprob], dim=1),
             dim=1)
-
-        return new_state, action_emb, loss_piece
+        return loss_piece
     
     def token_infer(self, output, gen_logodds, desc_enc):
         # Copy tokens
@@ -872,7 +786,7 @@ class TreeTraversal:
                         parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
-                return self.model.rule_infer(self.cur_item.node_type, rule_logits)
+                return self.rule_choice(self.cur_item.node_type, rule_logits)
 
             elif self.cur_item.state == SUM_TYPE_APPLY:
                 # b. Add action, prepare for #2
@@ -913,7 +827,7 @@ class TreeTraversal:
                         parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
-                return self.model.rule_infer(self.cur_item.node_type, rule_logits)
+                return self.rule_choice(self.cur_item.node_type, rule_logits)
             
             elif self.cur_item.state == CHILDREN_APPLY:
                 # b. Create the children
@@ -981,7 +895,7 @@ class TreeTraversal:
                         parent_h=output)
 
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
-                return self.model.rule_infer(list_type, rule_logits)
+                return self.rule_choice(list_type, rule_logits)
             
             elif self.cur_item.state == LIST_LENGTH_APPLY:
                 list_type, num_children = self.model.preproc.all_rules[last_choice]
@@ -1026,10 +940,8 @@ class TreeTraversal:
                         self.cur_item.parent_h,
                         self.cur_item.parent_action_emb,
                         self.desc_enc)
-                log_probs_by_word = self.model.token_infer(output, gen_logodds, self.desc_enc)
-
                 self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.GEN_TOKEN
-                return log_probs_by_word
+                return self.token_choice(output, gen_logodds)
 
             elif self.cur_item.state == NODE_FINISHED:
                 if self.pop():
@@ -1063,6 +975,61 @@ class TreeTraversal:
            self.queue = self.queue.delete(-1)
            return True
         return False
+
+    def rule_choice(self, node_type, rule_logits):
+        raise NotImplementedError
+
+    def token_choice(self, output, gen_logodds):
+        raise NotImplementedError
+
+
+class TrainTreeTraversal(TreeTraversal):
+
+    @attr.s(frozen=True)
+    class RuleChoicePoint:
+        node_type = attr.ib()
+        rule_logits = attr.ib()
+        def compute_loss(self, outer, rule_idx):
+            return outer.model.apply_rule_loss(self.rule_logits, rule_idx)
+
+    @attr.s(frozen=True)
+    class TokenChoicePoint:
+        lstm_output = attr.ib()
+        gen_logodds = attr.ib()
+        def compute_loss(self, outer, token):
+            return outer.model.gen_token_loss(
+                    self.lstm_output,
+                    self.gen_logodds,
+                    token,
+                    outer.desc_enc)
+
+    def __init__(self, model, desc_enc):
+        super().__init__(model, desc_enc)
+        self.choice_point = None
+        self.loss = pyrsistent.pvector()
+
+    def clone(self):
+        super_clone = super().clone()
+        super_clone.choice_point = self.choice_point
+        super_clone.loss = self.loss
+        return super_clone
+
+    def rule_choice(self, node_type, rule_logits):
+        self.choice_point = self.RuleChoicePoint(node_type, rule_logits)
+        return None
+
+    def token_choice(self, output, gen_logodds):
+        self.choice_point = self.TokenChoicePoint(output, gen_logodds)
+        return None
+
+    def update_using_last_choice(self, last_choice):
+        super().update_using_last_choice(last_choice)
+        if last_choice is None:
+            return
+
+        self.loss = self.loss.append(
+                self.choice_point.compute_loss(self, last_choice))
+        self.choice_point = None
 
 
 class InferenceTreeTraversal(TreeTraversal):
@@ -1108,6 +1075,12 @@ class InferenceTreeTraversal(TreeTraversal):
         super_clone.actions = self.actions
         return super_clone
 
+    def rule_choice(self, node_type, rule_logits):
+        return self.model.rule_infer(node_type, rule_logits)
+
+    def token_choice(self, output, gen_logodds):
+        return self.model.token_infer(output, gen_logodds, self.desc_enc)
+
     def update_using_last_choice(self, last_choice):
         super().update_using_last_choice(last_choice)
 
@@ -1139,7 +1112,6 @@ class InferenceTreeTraversal(TreeTraversal):
         # NODE_FINISHED
         elif self.cur_item.state == TreeTraversal.State.NODE_FINISHED:
             self.actions = self.actions.append(self.NodeFinished())
-
 
     def finalize(self):
         root = current = None

@@ -60,6 +60,8 @@ class PythonGrammar:
                 os.path.join(
                     os.path.dirname(os.path.abspath(__file__)), 'Python.asdl')))
 
+    root_type = 'Module'
+
     @classmethod
     def parse(cls, code):
         try:
