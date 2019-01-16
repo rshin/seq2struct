@@ -83,8 +83,9 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             grammar,
             save_path,
             min_freq=3,
-            max_count=5000):
-
+            max_count=5000,
+            use_seq_elem_rules=False):
+        
         self.grammar = registry.construct('grammar', grammar)
         self.ast_wrapper = self.grammar.ast_wrapper
 
@@ -94,6 +95,8 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.data_dir = os.path.join(save_path, 'dec')
 
         self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+        self.use_seq_elem_rules = use_seq_elem_rules
+
         # TODO: Write 'train', 'val', 'test' somewhere else
         self.items = {'train': [], 'val': [], 'test': []}
         self.sum_type_constructors = collections.defaultdict(set)
@@ -106,7 +109,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.rules_mask = None
 
     def validate_item(self, item, section):
-        parsed = self.grammar.parse(item.code)
+        parsed = self.grammar.parse(item.code, section)
         if parsed:
             self.ast_wrapper.verify_ast(parsed)
             return True, parsed
@@ -177,17 +180,21 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
 
     def _record_productions(self, tree):
-        queue = [tree]
+        queue = [(tree, False)]
         while queue:
-            node = queue.pop()
+            node, is_seq_elem = queue.pop()
             node_type = node['_type']
 
             # Rules of the form:
             # expr -> Attribute | Await | BinOp | BoolOp | ...
+            # expr_seq_elem -> Attribute | Await | ... | Template1 | Template2 | ...
             if node_type in self.ast_wrapper.constructors:
-                constructor = self.ast_wrapper.constructor_to_sum_type[node_type]
-                self.sum_type_constructors[constructor].add(node_type)
-
+                sum_type_name = self.ast_wrapper.constructor_to_sum_type[node_type]
+                if is_seq_elem and self.use_seq_elem_rules:
+                    self.sum_type_constructors[sum_type_name + '_seq_elem'].add(node_type)
+                else:
+                    self.sum_type_constructors[sum_type_name].add(node_type)
+            
             # Rules of the form:
             # FunctionDef
             # -> identifier name, arguments args
@@ -216,7 +223,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
                     to_enqueue = [field_value]
                 for child in to_enqueue:
                     if isinstance(child, collections.abc.Mapping) and '_type' in child:
-                        queue.append(child)
+                        queue.append((child, field_info.seq))
                     else:
                         self.primitive_types.add(type(child).__name__)
 
@@ -228,6 +235,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
 
         # Rules of the form:
         # expr -> Attribute | Await | BinOp | BoolOp | ...
+        # expr_seq_elem -> Attribute | Await | ... | Template1 | Template2 | ...
         for parent, children in sorted(self.sum_type_constructors.items()):
             assert not isinstance(children, set)
             rules_mask[parent] = (offset, offset + len(children))
@@ -316,12 +324,20 @@ class NL2CodeDecoder(torch.nn.Module):
 
         self.rules_index = {v: idx for idx, v in enumerate(self.preproc.all_rules)}
 
-        self.node_type_vocab = vocab.Vocab(
-                sorted(self.preproc.primitive_types) +
-                sorted(self.ast_wrapper.sum_types.keys()) +
-                sorted(self.ast_wrapper.singular_types.keys()) +
-                sorted(self.preproc.seq_lengths.keys()),
-                special_elems=())
+        if self.preproc.use_seq_elem_rules:
+            self.node_type_vocab = vocab.Vocab(
+                    sorted(self.preproc.primitive_types) +
+                    sorted(self.preproc.sum_type_constructors.keys()) +
+                    sorted(self.preproc.field_presence_infos.keys()) +
+                    sorted(self.preproc.seq_lengths.keys()),
+                    special_elems=())
+        else:
+            self.node_type_vocab = vocab.Vocab(
+                    sorted(self.preproc.primitive_types) +
+                    sorted(self.ast_wrapper.sum_types.keys()) +
+                    sorted(self.ast_wrapper.singular_types.keys()) +
+                    sorted(self.preproc.seq_lengths.keys()),
+                    special_elems=())
 
         self.state_update = lstm.RecurrentDropoutLSTMCell(
                 input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
@@ -379,6 +395,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
         # Rules of the form:
         # expr -> Attribute | Await | BinOp | BoolOp | ...
+        # expr_seq_elem -> Attribute | Await | ... | Template1 | Template2 | ...
         for parent, children in sorted(preproc.sum_type_constructors.items()):
             assert parent not in rules_mask
             rules_mask[parent] = (offset, offset + len(children))
@@ -418,7 +435,7 @@ class NL2CodeDecoder(torch.nn.Module):
         queue = [
             TreeState(
                 node=example.tree,
-                parent_field_type=None,
+                parent_field_type=self.preproc.grammar.root_type,
             )
         ]
         while queue:
@@ -445,6 +462,9 @@ class NL2CodeDecoder(torch.nn.Module):
                 rule_idx = self.rules_index[rule]
                 traversal.step(rule_idx)
 
+                if self.preproc.use_seq_elem_rules and parent_field_type in self.ast_wrapper.sum_types:
+                    parent_field_type += '_seq_elem'
+
                 for i, elem in reversed(list(enumerate(node))):
                     queue.append(
                         TreeState(
@@ -455,7 +475,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
             type_info = self.ast_wrapper.singular_types[node['_type']]
 
-            if parent_field_type in self.ast_wrapper.sum_types:
+            if parent_field_type in self.preproc.sum_type_constructors:
                 # ApplyRule, like expr -> Call
                 rule = (parent_field_type, type_info.name)
                 rule_idx = self.rules_index[rule]
@@ -735,10 +755,16 @@ class TreeTraversal:
         self.recurrent_state = lstm_init(model._device, None, self.model.recurrent_size, 1)
         self.prev_action_emb = model.zero_rule_emb
 
+        root_type = model.preproc.grammar.root_type 
+        if root_type in model.preproc.ast_wrapper.sum_types:
+            initial_state = TreeTraversal.State.SUM_TYPE_INQUIRE
+        else:
+            initial_state = TreeTraversal.State.CHILDREN_INQUIRE
+
         self.queue = pyrsistent.pvector()
         self.cur_item = TreeTraversal.QueueItem(
-                state=TreeTraversal.State.CHILDREN_INQUIRE,
-                node_type=model.preproc.grammar.root_type,
+                state=initial_state,
+                node_type=root_type,
                 parent_action_emb=self.model.zero_rule_emb,
                 parent_h=self.model.zero_recurrent_emb,
                 parent_field_name=None)
@@ -903,8 +929,11 @@ class TreeTraversal:
                 assert list_type == elem_type + '*'
 
                 for i in range(num_children):
+                    child_node_type = elem_type
                     if elem_type in self.model.ast_wrapper.sum_types:
                         child_state = SUM_TYPE_INQUIRE
+                        if self.model.preproc.use_seq_elem_rules:
+                            child_node_type = elem_type + '_seq_elem'
                     elif elem_type in self.model.ast_wrapper.product_types:
                         child_state = CHILDREN_INQUIRE
                     elif elem_type in asdl.builtin_types:
@@ -914,7 +943,7 @@ class TreeTraversal:
                         raise ValueError('Unable to handle seq field type {}'.format(elem_type))
                     self.queue = self.queue.append(TreeTraversal.QueueItem(
                         state=child_state,
-                        node_type=elem_type,
+                        node_type=child_node_type,
                         parent_action_emb=self.prev_action_emb,
                         parent_h=self.cur_item.parent_h,
                         parent_field_name=self.cur_item.parent_field_name,

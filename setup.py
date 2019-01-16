@@ -14,6 +14,7 @@ setup(
         'jsonnet~=0.11.2',
         'nltk~=3.4',
         'numpy~=1.15.4',
+        'pyrsistent~=0.14.9',
         'torch~=0.4.0',
         'tqdm~=4.28.1',
     ],

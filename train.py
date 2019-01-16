@@ -26,6 +26,8 @@ class TrainConfig:
     eval_batch_size = attr.ib(default=32)
     max_steps = attr.ib(default=100000)
     num_eval_items = attr.ib(default=None)
+    eval_on_train = attr.ib(default=True)
+    eval_on_val = attr.ib(default=True)
 
 
 def log(msg):
@@ -121,8 +123,10 @@ def main():
 
         # Evaluate model
         if last_step % train_config.eval_every_n == 0:
-            eval_model(model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
-            eval_model(model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
+            if train_config.eval_on_train:
+                eval_model(model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
+            if train_config.eval_on_val:
+                eval_model(model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
 
         # Compute and apply gradient
         # TODO: update learning rate

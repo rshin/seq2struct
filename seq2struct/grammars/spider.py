@@ -28,7 +28,7 @@ class SpiderLanguage:
     #def __init__(self, tables_path):
     #    pass
 
-    def parse(self, code):
+    def parse(self, code, section):
         return self.parse_sql(code)
 
     @classmethod

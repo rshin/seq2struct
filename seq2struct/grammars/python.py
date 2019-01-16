@@ -63,7 +63,7 @@ class PythonGrammar:
     root_type = 'Module'
 
     @classmethod
-    def parse(cls, code):
+    def parse(cls, code, section):
         try:
             py_ast = ast.parse(code)
             return cls.convert_native_ast(py_ast)

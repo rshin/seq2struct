@@ -23,8 +23,6 @@ class ASTWrapperVisitor(asdl.VisitorBase):
         self.sum_types = {}  # type: Dict[str, asdl.Sum]
         self.product_types = {}  # type: Dict[str, asdl.Product]
         self.fieldless_constructors = {}  # type: Dict[str, asdl.Constructor]
-        self.optional_fields = []  # type: List[Tuple[str, str]]
-        self.sequential_fields = []  # type: List[Tuple[str, str]]
 
     def visitModule(self, mod):
         # type: (asdl.Module) -> None
@@ -56,10 +54,6 @@ class ASTWrapperVisitor(asdl.VisitorBase):
         if field.name is None:
             raise ValueError('Field of type {} in {} lacks name'.format(
                 field.type, name))
-        if field.opt:
-            self.optional_fields.append((name, field.name))
-        elif field.seq:
-            self.sequential_fields.append((name, field.name))
 
     def visitProduct(self, prod, name):
         # type: (asdl.Product, str) -> None
@@ -87,6 +81,7 @@ class ASTWrapper(object):
         self.constructors = visitor.constructors
         self.sum_types = visitor.sum_types
         self.product_types = visitor.product_types
+        self.seq_fragment_constructors = {}
 
         # Product types and constructors:
         # no need to decide upon a further type for these.
@@ -104,10 +99,13 @@ class ASTWrapper(object):
             for name, sum_type in self.sum_types.items()
             for constructor in sum_type.types
         }
+        self.seq_fragment_constructor_to_sum_type = {
+            constructor.name: name
+            for name, sum_type in self.sum_types.items()
+            for constructor in sum_type.types
+        }
         self.fieldless_constructors = sorted(
             visitor.fieldless_constructors.keys())
-        self.optional_fields = sorted(visitor.optional_fields)
-        self.sequential_fields = sorted(visitor.sequential_fields)
 
     @property
     def types(self):
@@ -118,8 +116,49 @@ class ASTWrapper(object):
     def root_type(self):
         # type: () -> str
         return self._root_type
+    
+    def add_sum_type(self, name, sum_type):
+        assert name not in self.sum_types
+        self.sum_types[name] = sum_type
+        self.types[name] = sum_type
 
-    def verify_ast(self, node, expected_type=None, field_path=()):
+        for type_ in sum_type.types:
+            self._add_constructor(name, type_)
+
+    def add_constructors_to_sum_type(self, sum_type_name, constructors):
+        for constructor in constructors:
+            self._add_constructor(sum_type_name, constructor)
+        self.sum_types[sum_type_name].types += constructors
+    
+    def remove_product_type(self, product_type_name):
+        self.singular_types.pop(product_type_name)
+        self.product_types.pop(product_type_name)
+        self.types.pop(product_type_name)
+    
+    def add_seq_fragment_type(self, sum_type_name, constructors):
+        for constructor in constructors:
+            # TODO: Record that this constructor is a sequence fragment?
+            self._add_constructor(sum_type_name, constructor)
+
+        sum_type = self.sum_types[sum_type_name]
+        # TODO: Remove seq_fragment_tpyes if it's not useful?
+        if not hasattr(sum_type, 'seq_fragment_types'):
+            sum_type.seq_fragment_types = []
+        sum_type.seq_fragment_types += constructors
+
+    def _add_constructor(self, sum_type_name, constructor):
+        assert constructor.name not in self.constructors
+        self.constructors[constructor.name] = constructor
+        assert constructor.name not in self.singular_types
+        self.singular_types[constructor.name] = constructor
+        assert constructor.name not in self.constructor_to_sum_type
+        self.constructor_to_sum_type[constructor.name] = sum_type_name
+
+        if not constructor.fields:
+            self.fieldless_constructors.append(constructor.name)
+            self.fieldless_constructors.sort()
+
+    def verify_ast(self, node, expected_type=None, field_path=(), is_seq=False):
         # type: (ASTWrapper, Node, Optional[str], Tuple[str, ...]) -> None
         # pylint: disable=too-many-branches
         '''Checks that `node` conforms to the current ASDL.'''
@@ -140,6 +179,8 @@ class ASTWrapper(object):
             elif isinstance(sum_product, asdl.Sum):
                 possible_names = [t.name
                                   for t in sum_product.types]  # type: List[str]
+                if is_seq:
+                    possible_names += [t.name for t in getattr(sum_product, 'seq_fragment_types', [])]
                 if node_type not in possible_names:
                     raise ValueError(
                         'Expected one of {}, but instead saw {}. path: {}'.format(
@@ -195,7 +236,7 @@ class ASTWrapper(object):
                 check = item_type[field.type]
             else:
                 # pylint: disable=line-too-long
-                check = lambda n: self.verify_ast(n, field.type, field_path + (field.name, ))  # noqa: E731,E501
+                check = lambda n: self.verify_ast(n, field.type, field_path + (field.name, ), is_seq=field.seq)  # noqa: E731,E501
 
             for item in items:
                 check(item)
