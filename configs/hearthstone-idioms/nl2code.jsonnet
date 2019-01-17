@@ -1,5 +1,6 @@
-local PREFIX = 'data/hearthstone-idioms-20190113/rewritten-trees/filt-none_st-cov-examples_nt-80/';
-{
+function(args) {
+  local PREFIX = 'data/hearthstone-idioms-20190113/rewritten-trees/filt-%(filt)s_st-%(st)s_nt-%(nt)d/' % args,
+
     data: {
         train: {
             name: 'idiom_ast', 
@@ -53,6 +54,7 @@ local PREFIX = 'data/hearthstone-idioms-20190113/rewritten-trees/filt-none_st-co
         eval_on_train: true,
         eval_on_val: false,
     },
+
     optimizer: {
         name: 'adadelta',
         lr: 1.0,

@@ -34,13 +34,24 @@ class TrainConfig:
     eval_on_val = attr.ib(default=True)
 
 
-def log(msg):
-    print('[{}] {}'.format(
-        datetime.datetime.now().replace(microsecond=0).isoformat(),
-        msg))
+class Logger:
+    def __init__(self, log_path=None):
+        self.log_file = None
+        if log_path is not None:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            self.log_file = open(log_path, 'a+')
+
+    def log(self, msg):
+        formatted = '[{}] {}'.format(
+            datetime.datetime.now().replace(microsecond=0).isoformat(),
+            msg)
+        print(formatted)
+        if self.log_file:
+            self.log_file.write(formatted + '\n')
+            self.log_file.flush()
 
 
-def eval_model(model, last_step, eval_data_loader, eval_section, num_eval_items=None):
+def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
     stats = collections.defaultdict(float)
     model.eval()
     for eval_batch in eval_data_loader:
@@ -56,7 +67,7 @@ def eval_model(model, last_step, eval_data_loader, eval_section, num_eval_items=
         stats[k] /= stats['total']
     del stats['total']
 
-    log("Step {} stats, {}: {}".format(
+    logger.log("Step {} stats, {}: {}".format(
         last_step, eval_section, ", ".join(
         "{} = {}".format(k, v) for k, v in stats.items())))
 
@@ -71,14 +82,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', required=True)
     parser.add_argument('--config', required=True)
+    parser.add_argument('--config-args')
     args = parser.parse_args()
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
-    config = json.loads(_jsonnet.evaluate_file(args.config))
+    if args.config_args:
+        config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
+    else:
+        config = json.loads(_jsonnet.evaluate_file(args.config))
+
     train_config = registry.instantiate(TrainConfig, config['train'])
+
+    logger = Logger(os.path.join(args.logdir, 'log.txt'))
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
@@ -128,9 +146,9 @@ def main():
         # Evaluate model
         if last_step % train_config.eval_every_n == 0:
             if train_config.eval_on_train:
-                eval_model(model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
+                eval_model(logger, model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
             if train_config.eval_on_val:
-                eval_model(model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
+                eval_model(logger, model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
 
         # Compute and apply gradient
         # TODO: update learning rate
@@ -141,7 +159,7 @@ def main():
 
         # Report metrics
         if last_step % train_config.report_every_n == 0:
-            log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
+            logger.log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
 
         last_step += 1
         # Run saver
