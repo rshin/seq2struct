@@ -1,7 +1,9 @@
 import collections
+import copy
 import enum
 import functools
 import json
+import re
 
 import asdl
 
@@ -22,6 +24,7 @@ class IdiomAstGrammar:
         self.templates = json.load(open(template_file))
 
         self.ast_wrapper = self.base_grammar.ast_wrapper
+        self.base_ast_wrapper = copy.deepcopy(self.ast_wrapper)
         self.root_type = self.base_grammar.root_type
         if base_grammar['name'] == 'python':
             self.root_type = 'mod'
@@ -120,12 +123,14 @@ class IdiomAstGrammar:
 
     def parse(self, code, section):
         if section == 'train':
-            return self.convert_idiom_ast(code, has_hole_info=False)
+            return self.convert_idiom_ast(code, has_hole_info=False)()
         else:
             return self.base_grammar.parse(code, section)
 
     def unparse(self, tree):
-        raise NotImplementedError
+        expanded_tree = self._expand_templates(tree)
+        self.base_ast_wrapper.verify_ast(expanded_tree)
+        return self.base_grammar.unparse(expanded_tree)
 
     def tokenize_field_value(self, field_value):
         return self.base_grammar.tokenize_field_value(field_value)
@@ -133,6 +138,48 @@ class IdiomAstGrammar:
     #
     #
     #
+
+    def _expand_templates(self, tree):
+        if not isinstance(tree, dict):
+            return tree
+
+        node_type = tree['_type']
+        constructor = self.ast_wrapper.constructors.get(node_type)
+
+        expanded_fields = {}
+        for field, value in tree.items():
+            if field == '_type':
+                continue
+            if isinstance(value, (list, tuple)):
+                result = []
+                for item in value:
+                    converted = self._expand_templates(item)
+                    if isinstance(item, dict) and re.match('^Template\d+_.*_seq$', item['_type']):
+                        item_type_info = self.ast_wrapper.constructors[converted['_type']]
+
+                        assert len(item_type_info.fields) == 1
+                        assert item_type_info.fields[0].seq
+                        result += converted.get(item_type_info.fields[0].name, [])
+                    else:
+                        result.append(converted)
+                expanded_fields[field] = result
+            else:
+                expanded_fields[field] = self._expand_templates(value)
+
+        if constructor is None or not hasattr(constructor, 'template'):
+            return {'_type': node_type, **expanded_fields}
+ 
+        template = constructor.template
+        hole_values = {}
+        for field, expanded_value in expanded_fields.items():
+            m = re.match('^hole(\d+)$', field)
+            if not m:
+                raise ValueError('Unexpected field name: {}'.format(field))
+            hole_id = int(m.group(1))
+
+            # Do something special if we have a seq fragment
+            hole_values[hole_id] = expanded_value
+        return template(hole_values)
     
     def _template_to_constructor(self, template_dict, suffix=''):
         hole_node_types = {}
@@ -161,14 +208,16 @@ class IdiomAstGrammar:
         
         # Create fields for the holes
         fields = []
-        for i, hole in enumerate(template_dict['holes']):
+        for hole in template_dict['holes']:
+            i = hole['id']
             field_type, seq, opt = hole_node_types[i]
             field = asdl.Field(type=field_type, name='hole{}'.format(i), seq=seq, opt=opt)
             field.hole_type = HoleType[hole['type']]
             fields.append(field)
 
         constructor = asdl.Constructor('Template{}{}'.format(template_dict['id'], suffix), fields)
-        # TODO: Also save information about the actual idiom trees and how to fill them
+        constructor.template = self.convert_idiom_ast(template_dict['idiom'], has_hole_info=True)
+
         return constructor
 
     def convert_idiom_ast(self, idiom_ast, has_hole_info, seq_fragment_type=None):
@@ -203,7 +252,7 @@ class IdiomAstGrammar:
                 if field.hole_type == HoleType.ReplaceSelf:
                     children_to_convert.append((field, child))
                 elif field.hole_type == HoleType.AddChild:
-                    # TODO: Determine node_type_for_field from where the hole appears in the idiom tree
+                    assert not field.seq
                     dummy_node = list(idiom_ast)
                     dummy_node[0] = '{}-{}'.format(node_type, field.name)
                     dummy_node[-1] = [child]
@@ -223,57 +272,81 @@ class IdiomAstGrammar:
                     children_to_convert.append((fields_by_name[field_name], child))
         assert set(field.name for field, _ in children_to_convert) == set(field.name for field in type_info.fields)
 
-        result = {}
-        #for field, node_type_for_field, child_nodes in children_to_convert:
-        for field, child_node in children_to_convert:
-            # field: ast.Field object representing the field in the ASDL Constructor/Product
-            # node_type_for_field: 
-            #   name of the node in idiom_ast format which specifies the field
-            #   (e.g. 'Import-names', 'List')
-            # child_nodes:
-            #   the idiom_ast nodes which specify the field
-            #   len(child_nodes)
-            #   - 0: should never happen
-            #   - 1: for regular fields, opt fields, seq fields if length is 0 or represented by a template node
-            #   - 2: for seq fields of length >= 1
-            if field.type in asdl.builtin_types:
-                convert = lambda node: node[0]
-            else:
-                convert = functools.partial(
-                    self.convert_idiom_ast, has_hole_info=has_hole_info)
-
-            if field.seq:
-                value = []
-                while True:
-                    child_type, child_children = child_node[0], child_node[-1]
-                    if isinstance(child_type, dict):
-                        value.append(convert(child_node, seq_fragment_type=field.type))
-                        break
-                    # If control reaches here, child_node is a binarizer node
-                    if len(child_children) == 1:
-                        assert child_children[0][0] == 'End'
-                        break
-                    elif len(child_children) == 2:
-                        value.append(convert(child_children[0]))
-                        child_node = child_children[-1]
-                    else:
-                        raise ValueError('Unexpected number of children: {}'.format(len(child_children)))
-                present = bool(value)
-            elif field.opt:
-                assert len(child_node[-1]) == 1
-                # type of first (and only) child of child_node
-                if child_node[-1][0][0] == 'Null':  
-                    value = None
-                    present = False
+        def result_creator(hole_values={}):
+            result = {}
+            for field, child_node in children_to_convert:
+                # field: ast.Field object representing the field in the ASDL Constructor/Product
+                # child_node:
+                #   the idiom_ast nodes which specify the field
+                #   len(child_children)
+                #   - 0: should never happen
+                #   - 1: for regular fields, opt fields, seq fields if length is 0 or represented by a template node
+                #   - 2: for seq fields of length >= 1
+                if field.type in asdl.builtin_types:
+                    convert = lambda node: (lambda hole_values: self.convert_builtin_type(field.type, node[0]))
                 else:
-                    value = convert(child_node[-1][0])
-                    present = True
-            else:
-                assert len(child_node[-1]) == 1
-                value = convert(child_node[-1][0])
-                present = True
-            if present:
-                result[field.name] = value
+                    convert = functools.partial(
+                        self.convert_idiom_ast, has_hole_info=has_hole_info)
 
-        result['_type'] = node_type
-        return result
+                if field.seq:
+                    value = []
+                    while True:
+                        # child_node[2]: ID of hole
+                        if has_hole_info and child_node[2] is not None:
+                            hole_value =  hole_values.get(child_node[2], [])
+                            value += hole_value
+                            assert len(child_node[-1]) == 0
+                            break
+
+                        child_type, child_children = child_node[0], child_node[-1]
+                        if isinstance(child_type, dict):
+                            # Another template
+                            value.append(convert(child_node, seq_fragment_type=field.type)(hole_values))
+                            break
+                        # If control reaches here, child_node is a binarizer node
+                        if len(child_children) == 1:
+                            assert child_children[0][0] == 'End'
+                            break
+                        elif len(child_children) == 2:
+                            # TODO: Sometimes we need to value.extend?
+                            value.append(convert(child_children[0])(hole_values))
+                            child_node = child_children[1]
+                        else:
+                            raise ValueError('Unexpected number of children: {}'.format(len(child_children)))
+                    present = bool(value)
+                elif field.opt:
+                    # child_node[2]: ID of hole
+                    if has_hole_info and child_node[2] is not None:
+                        assert len(child_node[-1]) == 0
+                        present = child_node[2] in hole_values
+                        value = hole_values.get(child_node[2])
+                    else:
+                        assert len(child_node[-1]) == 1
+                        # type of first (and only) child of child_node
+                        if child_node[-1][0][0] == 'Null':
+                            value = None
+                            present = False
+                        else:
+                            value = convert(child_node[-1][0])(hole_values)
+                            present = True
+                else:
+                    if has_hole_info and child_node[2] is not None:
+                        assert len(child_node[-1]) == 0
+                        value = hole_values[child_node[2]]
+                        present = True
+                    else:
+                        assert len(child_node[-1]) == 1
+                        value = convert(child_node[-1][0])(hole_values)
+                        present = True
+                if present:
+                    result[field.name] = value
+
+            result['_type'] = node_type
+            return result
+
+        return result_creator
+
+    def convert_builtin_type(self, field_type, value):
+        if field_type == 'singleton' and value == 'Null':
+            return None
+        return value
