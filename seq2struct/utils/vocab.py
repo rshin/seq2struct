@@ -89,10 +89,10 @@ class VocabBuilder:
         self.min_freq = min_freq
         self.max_count = max_count
 
-    def add_word(self, word):
-        self.word_freq[word] += 1
+    def add_word(self, word, count=1):
+        self.word_freq[word] += count
 
-    def finish(self):
+    def finish(self, *args, **kwargs):
         # Select the `max_count` most frequent words. If `max_count` is None, then choose all of the words.
         eligible_words_and_freqs = self.word_freq.most_common(self.max_count)
         if self.min_freq is not None:
@@ -101,4 +101,6 @@ class VocabBuilder:
                     eligible_words_and_freqs = eligible_words_and_freqs[:i]
                     break
 
-        return Vocab(word for word, freq in sorted(eligible_words_and_freqs))
+        return Vocab(
+                    (word for word, freq in sorted(eligible_words_and_freqs)), 
+                    *args, **kwargs)
