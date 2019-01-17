@@ -1188,14 +1188,6 @@ class InferenceTreeTraversal(TreeTraversal):
                 current[action.parent_field_name] = value
 
             elif isinstance(action, self.NodeFinished):
-                # Add any missing fields
-                type_info = self.model.preproc.ast_wrapper.singular_types[current['_type']]
-                for field_info in type_info.fields:
-                    if field_info.seq:
-                        current.setdefault(field_info.name, [])
-                    elif field_info.opt:
-                        current.setdefault(field_info.name, None)
-
                 current = stack.pop()
 
             else:

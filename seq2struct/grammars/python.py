@@ -40,16 +40,6 @@ def split_string_whitespace_and_camelcase(s):
     return result[:-1]
 
 
-def to_native_ast(node):
-    if isinstance(node, (list, tuple)):
-        return [to_native_ast(item) for item in node]
-    elif not isinstance(node, dict):
-        return node
-
-    result = getattr(ast, node['_type'])()
-    for field, value in node.items():
-        setattr(result, field, to_native_ast(value))
-    return result
 
 
 @registry.register('grammar', 'python')
@@ -66,13 +56,13 @@ class PythonGrammar:
     def parse(cls, code, section):
         try:
             py_ast = ast.parse(code)
-            return cls.convert_native_ast(py_ast)
+            return cls.from_native_ast(py_ast)
         except SyntaxError:
             return  None
 
     @classmethod
     def unparse(cls, tree):
-        ast_tree = to_native_ast(tree)
+        ast_tree = cls.to_native_ast(tree)
         return astor.to_source(ast_tree)
 
     @classmethod
@@ -84,7 +74,7 @@ class PythonGrammar:
         return split_string_whitespace_and_camelcase(field_value)
 
     @classmethod
-    def convert_native_ast(cls, node):
+    def from_native_ast(cls, node):
         # type: (ast.AST) -> Dict[str, Any]
         node_type = node.__class__.__name__
         field_infos = {
@@ -101,9 +91,29 @@ class PythonGrammar:
             if isinstance(value, (list, tuple)):
                 assert field_info.seq
                 if value:
-                    result[field] = [cls.convert_native_ast(v) for v in value]
+                    result[field] = [cls.from_native_ast(v) for v in value]
             elif not isinstance(value, ast.AST):
                 result[field] = value
             else:
-                result[field] = cls.convert_native_ast(value)
+                result[field] = cls.from_native_ast(value)
+        return result
+
+    @classmethod
+    def to_native_ast(cls, node):
+        if isinstance(node, (list, tuple)):
+            return [cls.to_native_ast(item) for item in node]
+        elif not isinstance(node, dict):
+            return node
+
+        result = getattr(ast, node['_type'])()
+        # Add any missing fields
+        type_info = cls.ast_wrapper.singular_types[node['_type']]
+        for field_info in type_info.fields:
+            if field_info.seq:
+                value = node.get(field_info.name, [])
+            elif field_info.opt:
+                value = node.get(field_info.name, None)
+            else:
+                value = node[field_info.name]
+            setattr(result, field_info.name, cls.to_native_ast(value))
         return result
