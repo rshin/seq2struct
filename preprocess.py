@@ -5,7 +5,8 @@ import os
 import _jsonnet
 import tqdm
 
-import seq2struct
+from seq2struct import datasets
+from seq2struct import models
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 
