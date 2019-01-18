@@ -4,6 +4,7 @@ import itertools
 import re
 
 import attr
+import astor
 import nltk
 import torch.utils.data
 
@@ -81,7 +82,15 @@ class HearthstoneDataset(torch.utils.data.Dataset):
 
         smoothing_function = nltk.translate.bleu_score.SmoothingFunction().method3
 
-        def add(self, gold_code, inferred_code):
+        def add(self, item, inferred_code, obsolete_gold_code=None):
+            if obsolete_gold_code is None:
+                try:
+                    gold_code = astor.to_source(ast.parse(item.code))
+                except ParseError:
+                    return
+            else:
+                gold_code = obsolete_gold_code
+
             # Both of these should be canonicalized
             exact_match = gold_code == inferred_code
 

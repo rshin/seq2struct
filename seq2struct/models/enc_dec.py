@@ -57,6 +57,7 @@ class EncDecModel(torch.nn.Module):
 
     def __init__(self, preproc, device, encoder, decoder):
         super().__init__()
+        self.preproc = preproc
         self.encoder = registry.construct(
                 'encoder', encoder, device=device, preproc=preproc.enc_preproc)
         self.decoder = registry.construct(
@@ -77,6 +78,10 @@ class EncDecModel(torch.nn.Module):
         return result
 
     def begin_inference(self, item):
-        enc_input, dec_output = item
+        # TODO: Don't hardcode train
+        valid, validation_info =  self.preproc.enc_preproc.validate_item(item, 'train')
+        if not valid:
+            return None
+        enc_input =  self.preproc.enc_preproc.preprocess_item(item, validation_info)
         enc_state = self.encoder(enc_input)
         return self.decoder.begin_inference(enc_state)

@@ -1095,6 +1095,13 @@ class InferenceTreeTraversal(TreeTraversal):
         'float': float,
         'bool': bool,
     }
+ 
+    SIMPLE_TERMINAL_TYPES_DEFAULT = {
+        'str': '',
+        'int': 0,
+        'float': 0,
+        'bool': True,
+    }
 
     def __init__(self, model, desc_enc):
         super().__init__(model, desc_enc)
@@ -1178,7 +1185,10 @@ class InferenceTreeTraversal(TreeTraversal):
                 terminal = ''.join(current.get(action.parent_field_name, []))
                 constructor = self.SIMPLE_TERMINAL_TYPES.get(action.terminal_type)
                 if constructor:
-                    value = constructor(terminal)
+                    try:
+                        value = constructor(terminal)
+                    except ValueError:
+                        value = self.SIMPLE_TERMINAL_TYPES_DEFAULT[action.terminal_type]
                 elif action.terminal_type == 'bytes':
                     value = terminal.decode('latin1')
                 elif action.terminal_type == 'NoneType':

@@ -1,46 +1,29 @@
 import argparse
 import ast
-import collections
-import datetime
 import itertools
 import json
-import os
 
 import _jsonnet
-import attr
 import asdl
 import astor
 import torch
 import tqdm
 
-from seq2struct import ast_util
 from seq2struct import beam_search
+from seq2struct import datasets
 from seq2struct import models
 from seq2struct import optimizers
 from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
-from seq2struct.utils import vocab
-
-
-@attr.s
-class TrainConfig:
-    eval_every_n = attr.ib(default=100)
-    report_every_n = attr.ib(default=100)
-    save_every_n = attr.ib(default=100)
-    keep_every_n = attr.ib(default=1000)
-
-    batch_size = attr.ib(default=32)
-    eval_batch_size = attr.ib(default=32)
-    max_steps = attr.ib(default=100000)
-    num_eval_items = attr.ib(default=None)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', required=True)
     parser.add_argument('--config', required=True)
+    parser.add_argument('--config-args')
 
-    parser.add_argument('--section', default='train')
+    parser.add_argument('--section', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--beam-size', required=True, type=int)
     parser.add_argument('--limit', type=int)
@@ -50,7 +33,10 @@ def main():
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
-    config = json.loads(_jsonnet.evaluate_file(args.config))
+    if args.config_args:
+        config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
+    else:
+        config = json.loads(_jsonnet.evaluate_file(args.config))
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
@@ -71,9 +57,9 @@ def main():
 
     # 3. Get training data somewhere
     output = open(args.output, 'w')
+    data = registry.construct('dataset', config['data'][args.section])
 
-    data = model_preproc.dataset(args.section)
-    for item in tqdm.tqdm(itertools.islice(data, args.limit)):
+    for i, item in enumerate(tqdm.tqdm(itertools.islice(data, args.limit))):
         beams = beam_search.beam_search(
                 model, item, beam_size=args.beam_size, max_steps=1000)
 
@@ -84,19 +70,16 @@ def main():
             decoded.append({
                 'model_output': model_output,
                 'inferred_code': inferred_code,
+
                 'score': beam.score,
                 'choice_history': beam.choice_history,
                 'score_history': beam.score_history,
             })
 
-        # TODO don't assume EncDecModel, Hearthstone
-        enc_input, dec_output = item
-        canonicalized_gold_code = astor.to_source(
-            ast.parse(dec_output.orig_code))
         output.write(
             json.dumps({
+                'index': i,
                 'beams': decoded,
-                'gold_code': canonicalized_gold_code
             }) + '\n')
         output.flush()
 

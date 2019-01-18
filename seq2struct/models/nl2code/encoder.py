@@ -45,6 +45,9 @@ class NL2CodeEncoder(torch.nn.Module):
                     self.vocab_builder.add_word(token)
             self.texts[section].append(item.text)
 
+        def preprocess_item(self, item, validation_info):
+            return item.text
+
         def save(self):
             os.makedirs(self.data_dir, exist_ok=True)
             self.vocab = self.vocab_builder.finish()
