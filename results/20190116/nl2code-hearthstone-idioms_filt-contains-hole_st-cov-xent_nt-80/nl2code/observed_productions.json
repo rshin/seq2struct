@@ -1,0 +1,1192 @@
+{
+  "field_presence_infos": {
+    "Add": [
+      []
+    ],
+    "And": [
+      []
+    ],
+    "Assign": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Attribute": [
+      [
+        true,
+        "str"
+      ]
+    ],
+    "AugAssign": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "BinOp": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "BoolOp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Break": [
+      []
+    ],
+    "Call": [
+      [
+        true,
+        false,
+        false
+      ],
+      [
+        true,
+        false,
+        true
+      ],
+      [
+        true,
+        true,
+        false
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "ClassDef": [
+      [
+        "str",
+        true,
+        false,
+        true,
+        false
+      ]
+    ],
+    "Compare": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "Eq": [
+      []
+    ],
+    "Expr": [
+      [
+        true
+      ]
+    ],
+    "For": [
+      [
+        true,
+        true,
+        true,
+        false
+      ]
+    ],
+    "FunctionDef": [
+      [
+        "str",
+        true,
+        true,
+        false,
+        false
+      ]
+    ],
+    "Gt": [
+      []
+    ],
+    "GtE": [
+      []
+    ],
+    "If": [
+      [
+        true,
+        true,
+        false
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "ImportFrom": [
+      [
+        "str",
+        true,
+        "int"
+      ]
+    ],
+    "In": [
+      []
+    ],
+    "Index": [
+      [
+        true
+      ]
+    ],
+    "Is": [
+      []
+    ],
+    "IsNot": [
+      []
+    ],
+    "Lambda": [
+      [
+        true,
+        true
+      ]
+    ],
+    "List": [
+      [
+        false
+      ],
+      [
+        true
+      ]
+    ],
+    "ListComp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Lt": [
+      []
+    ],
+    "LtE": [
+      []
+    ],
+    "Module": [
+      [
+        true
+      ]
+    ],
+    "Name": [
+      [
+        "str"
+      ]
+    ],
+    "NameConstant": [
+      [
+        "bool"
+      ],
+      [
+        "str"
+      ]
+    ],
+    "Not": [
+      []
+    ],
+    "NotEq": [
+      []
+    ],
+    "Num": [
+      [
+        "int"
+      ]
+    ],
+    "Or": [
+      []
+    ],
+    "Return": [
+      [
+        true
+      ]
+    ],
+    "Slice": [
+      [
+        false,
+        false,
+        false
+      ]
+    ],
+    "Str": [
+      [
+        "str"
+      ]
+    ],
+    "Sub": [
+      []
+    ],
+    "Subscript": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Template0": [
+      [
+        true,
+        "str",
+        true
+      ]
+    ],
+    "Template1": [
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        false,
+        false
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        false,
+        true
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        true,
+        false
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        false
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        true
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        true,
+        false
+      ]
+    ],
+    "Template10": [
+      [
+        "int",
+        "int",
+        "str",
+        false,
+        true
+      ],
+      [
+        "int",
+        "int",
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template11": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true
+      ]
+    ],
+    "Template12": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true
+      ]
+    ],
+    "Template13": [
+      [
+        "str",
+        "str",
+        "str"
+      ]
+    ],
+    "Template15": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template16": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template17": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template18": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template19": [
+      [
+        "str",
+        "int",
+        "str",
+        "str"
+      ]
+    ],
+    "Template2": [
+      [
+        "str",
+        "int",
+        "str",
+        true,
+        "str",
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        true,
+        "str",
+        true
+      ]
+    ],
+    "Template20": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        false,
+        false,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        false,
+        true,
+        true
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        true,
+        false,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        true,
+        false,
+        true
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        false,
+        "str",
+        true,
+        true,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        false,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        true,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        true,
+        false,
+        false
+      ]
+    ],
+    "Template21": [
+      [
+        "int",
+        "int",
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        false
+      ]
+    ],
+    "Template23": [
+      [
+        "int",
+        "int",
+        "str",
+        true
+      ]
+    ],
+    "Template25": [
+      [
+        "str",
+        "str",
+        "str"
+      ]
+    ],
+    "Template27": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "Template28": [
+      [
+        "str",
+        "int",
+        "str",
+        "int"
+      ]
+    ],
+    "Template3": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template30": [
+      [
+        "str",
+        true,
+        "str",
+        "int",
+        true
+      ]
+    ],
+    "Template31": [
+      [
+        "str",
+        "str",
+        false,
+        "str",
+        false,
+        false,
+        false
+      ],
+      [
+        "str",
+        "str",
+        false,
+        "str",
+        true,
+        false,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        false,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        false,
+        true,
+        false
+      ]
+    ],
+    "Template33": [
+      [
+        "str",
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template34": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true
+      ]
+    ],
+    "Template38": [
+      [
+        "str",
+        "str",
+        false,
+        false,
+        "str",
+        false,
+        false
+      ],
+      [
+        "str",
+        "str",
+        false,
+        false,
+        "str",
+        true,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        false,
+        "str",
+        false,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        false,
+        "str",
+        true,
+        false
+      ]
+    ],
+    "Template39": [
+      [
+        "str",
+        "str",
+        true,
+        false
+      ]
+    ],
+    "Template4": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "Template40": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template41": [
+      [
+        "str"
+      ]
+    ],
+    "Template42": [
+      [
+        "str",
+        true,
+        "str",
+        "int",
+        false
+      ]
+    ],
+    "Template43": [
+      [
+        "str",
+        "int",
+        "str",
+        "str"
+      ]
+    ],
+    "Template44": [
+      [
+        "int"
+      ]
+    ],
+    "Template47": [
+      [
+        "int"
+      ]
+    ],
+    "Template5": [
+      [
+        true,
+        "str",
+        false
+      ],
+      [
+        true,
+        "str",
+        true
+      ]
+    ],
+    "Template50": [
+      [
+        "str"
+      ]
+    ],
+    "Template52": [
+      [
+        "str"
+      ]
+    ],
+    "Template53": [
+      [
+        "int",
+        "str",
+        true
+      ]
+    ],
+    "Template54": [
+      [
+        "str"
+      ]
+    ],
+    "Template55": [
+      [
+        "str",
+        true
+      ]
+    ],
+    "Template56": [
+      [
+        "int",
+        "str",
+        false
+      ],
+      [
+        "int",
+        "str",
+        true
+      ]
+    ],
+    "Template57": [
+      [
+        "str",
+        true,
+        "str",
+        false,
+        false
+      ],
+      [
+        "str",
+        true,
+        "str",
+        false,
+        true
+      ],
+      [
+        "str",
+        true,
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template58": [
+      [
+        "str",
+        false,
+        "str",
+        false,
+        false
+      ],
+      [
+        "str",
+        true,
+        "str",
+        false,
+        false
+      ],
+      [
+        "str",
+        true,
+        "str",
+        false,
+        true
+      ],
+      [
+        "str",
+        true,
+        "str",
+        true,
+        false
+      ]
+    ],
+    "Template59": [
+      [
+        "str",
+        false
+      ],
+      [
+        "str",
+        true
+      ]
+    ],
+    "Template6": [
+      [
+        "str",
+        "int",
+        "str"
+      ]
+    ],
+    "Template60": [
+      [
+        "int"
+      ]
+    ],
+    "Template61": [
+      [
+        "int"
+      ]
+    ],
+    "Template62": [
+      [
+        "int"
+      ]
+    ],
+    "Template63": [
+      [
+        "int"
+      ]
+    ],
+    "Template65": [
+      [
+        "int",
+        "int",
+        "str",
+        true
+      ]
+    ],
+    "Template66": [
+      [
+        "str",
+        "str",
+        "int"
+      ]
+    ],
+    "Template67": [
+      [
+        true,
+        "str"
+      ]
+    ],
+    "Template69": [
+      [
+        "str",
+        "str"
+      ]
+    ],
+    "Template7": [
+      [
+        "str",
+        "str",
+        "str",
+        true,
+        "str"
+      ]
+    ],
+    "Template70": [
+      [
+        "str",
+        true
+      ]
+    ],
+    "Template71": [
+      [
+        "int"
+      ]
+    ],
+    "Template72": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "Template73": [
+      [
+        "int"
+      ]
+    ],
+    "Template74": [
+      [
+        "int"
+      ]
+    ],
+    "Template75": [
+      [
+        "int"
+      ]
+    ],
+    "Template76": [
+      [
+        "str"
+      ]
+    ],
+    "Template76_expr_seq": [
+      [
+        "str"
+      ]
+    ],
+    "Template77": [
+      [
+        "str"
+      ]
+    ],
+    "Template78": [
+      [
+        "int"
+      ]
+    ],
+    "Template79": [
+      [
+        "int"
+      ]
+    ],
+    "Template8": [
+      [
+        "str",
+        "int",
+        "str",
+        "str"
+      ]
+    ],
+    "Template9": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        "str",
+        true,
+        "str",
+        "str",
+        true
+      ]
+    ],
+    "Tuple": [
+      [
+        true
+      ]
+    ],
+    "UnaryOp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "alias": [
+      [
+        "str",
+        false
+      ]
+    ],
+    "arg": [
+      [
+        "str",
+        false
+      ]
+    ],
+    "arguments": [
+      [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    ],
+    "comprehension": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "keyword": [
+      [
+        "str",
+        true
+      ]
+    ]
+  },
+  "primitive_types": [
+    "NoneType",
+    "bool",
+    "int",
+    "str"
+  ],
+  "seq_lengths": {
+    "alias*": [
+      1,
+      10
+    ],
+    "arg*": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cmpop*": [
+      1
+    ],
+    "comprehension*": [
+      1
+    ],
+    "expr*": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      11
+    ],
+    "keyword_plus_templates*": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "stmt*": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      11
+    ]
+  },
+  "sum_type_constructors": {
+    "boolop": [
+      "And",
+      "Or"
+    ],
+    "cmpop_seq_elem": [
+      "Eq",
+      "Gt",
+      "GtE",
+      "In",
+      "Is",
+      "IsNot",
+      "Lt",
+      "LtE",
+      "NotEq"
+    ],
+    "expr": [
+      "Attribute",
+      "BinOp",
+      "BoolOp",
+      "Call",
+      "Compare",
+      "Lambda",
+      "List",
+      "ListComp",
+      "Name",
+      "NameConstant",
+      "Num",
+      "Subscript",
+      "Template25",
+      "Template39",
+      "Template47",
+      "Template54",
+      "Template56",
+      "Template59",
+      "Template63",
+      "Template67",
+      "Template69",
+      "Template76",
+      "Template77",
+      "Template79",
+      "Tuple",
+      "UnaryOp"
+    ],
+    "expr_seq_elem": [
+      "Attribute",
+      "BinOp",
+      "BoolOp",
+      "Call",
+      "Compare",
+      "Lambda",
+      "List",
+      "ListComp",
+      "Name",
+      "NameConstant",
+      "Num",
+      "Str",
+      "Subscript",
+      "Template28",
+      "Template30",
+      "Template38",
+      "Template41",
+      "Template42",
+      "Template52",
+      "Template59",
+      "Template60",
+      "Template61",
+      "Template66",
+      "Template67",
+      "Template69",
+      "Template70",
+      "Template71",
+      "Template73",
+      "Template74",
+      "Template75",
+      "Template76_expr_seq",
+      "Template77",
+      "Template79",
+      "UnaryOp"
+    ],
+    "keyword_plus_templates_seq_elem": [
+      "Template31",
+      "Template33",
+      "Template44",
+      "Template53",
+      "Template55",
+      "Template57",
+      "Template58",
+      "Template78",
+      "keyword"
+    ],
+    "mod": [
+      "Module"
+    ],
+    "operator": [
+      "Add",
+      "Sub"
+    ],
+    "slice": [
+      "Index",
+      "Slice"
+    ],
+    "stmt_seq_elem": [
+      "Assign",
+      "AugAssign",
+      "Break",
+      "ClassDef",
+      "Expr",
+      "For",
+      "FunctionDef",
+      "If",
+      "ImportFrom",
+      "Return",
+      "Template0",
+      "Template1",
+      "Template10",
+      "Template11",
+      "Template12",
+      "Template13",
+      "Template15",
+      "Template16",
+      "Template17",
+      "Template18",
+      "Template19",
+      "Template2",
+      "Template20",
+      "Template21",
+      "Template23",
+      "Template27",
+      "Template3",
+      "Template34",
+      "Template4",
+      "Template40",
+      "Template43",
+      "Template5",
+      "Template50",
+      "Template6",
+      "Template62",
+      "Template65",
+      "Template7",
+      "Template72",
+      "Template8",
+      "Template9"
+    ],
+    "unaryop": [
+      "Not"
+    ]
+  }
+}

@@ -1,0 +1,690 @@
+{
+  "field_presence_infos": {
+    "Add": [
+      []
+    ],
+    "And": [
+      []
+    ],
+    "Assign": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Attribute": [
+      [
+        true,
+        "str"
+      ]
+    ],
+    "AugAssign": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "BinOp": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "BoolOp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Break": [
+      []
+    ],
+    "Call": [
+      [
+        true,
+        false,
+        false
+      ],
+      [
+        true,
+        false,
+        true
+      ],
+      [
+        true,
+        true,
+        false
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "ClassDef": [
+      [
+        "str",
+        true,
+        false,
+        true,
+        false
+      ]
+    ],
+    "Compare": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "Eq": [
+      []
+    ],
+    "Expr": [
+      [
+        true
+      ]
+    ],
+    "For": [
+      [
+        true,
+        true,
+        true,
+        false
+      ]
+    ],
+    "FunctionDef": [
+      [
+        "str",
+        true,
+        true,
+        false,
+        false
+      ]
+    ],
+    "Gt": [
+      []
+    ],
+    "GtE": [
+      []
+    ],
+    "If": [
+      [
+        true,
+        true,
+        false
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "ImportFrom": [
+      [
+        "str",
+        true,
+        "int"
+      ]
+    ],
+    "In": [
+      []
+    ],
+    "Index": [
+      [
+        true
+      ]
+    ],
+    "Is": [
+      []
+    ],
+    "IsNot": [
+      []
+    ],
+    "Lambda": [
+      [
+        true,
+        true
+      ]
+    ],
+    "List": [
+      [
+        true
+      ]
+    ],
+    "ListComp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Lt": [
+      []
+    ],
+    "LtE": [
+      []
+    ],
+    "Name": [
+      [
+        "str"
+      ]
+    ],
+    "NameConstant": [
+      [
+        "bool"
+      ],
+      [
+        "str"
+      ]
+    ],
+    "Not": [
+      []
+    ],
+    "NotEq": [
+      []
+    ],
+    "Num": [
+      [
+        "int"
+      ]
+    ],
+    "Or": [
+      []
+    ],
+    "Return": [
+      [
+        true
+      ]
+    ],
+    "Slice": [
+      [
+        false,
+        false,
+        false
+      ]
+    ],
+    "Str": [
+      [
+        "str"
+      ]
+    ],
+    "Sub": [
+      []
+    ],
+    "Subscript": [
+      [
+        true,
+        true
+      ]
+    ],
+    "Template0": [
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        "str",
+        false,
+        true,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        "str",
+        false,
+        true,
+        true
+      ],
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        "str",
+        true,
+        true,
+        false
+      ],
+      [
+        "str",
+        "str",
+        true,
+        "str",
+        "str",
+        true,
+        true,
+        true
+      ]
+    ],
+    "Template10": [
+      []
+    ],
+    "Template13": [
+      [
+        "str"
+      ]
+    ],
+    "Template14": [
+      [
+        "int",
+        "int",
+        "str",
+        true
+      ]
+    ],
+    "Template16": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "Template17": [
+      [
+        true,
+        "str",
+        "str",
+        "str"
+      ]
+    ],
+    "Template18": [
+      []
+    ],
+    "Template19": [
+      [
+        "str",
+        true,
+        false,
+        false
+      ],
+      [
+        "str",
+        true,
+        false,
+        true
+      ],
+      [
+        "str",
+        true,
+        true,
+        false
+      ],
+      [
+        "str",
+        true,
+        true,
+        true
+      ]
+    ],
+    "Template2": [
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true,
+        false
+      ],
+      [
+        "str",
+        "int",
+        "str",
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template20": [
+      [
+        "str",
+        "int",
+        "int",
+        false
+      ],
+      [
+        "str",
+        "int",
+        "int",
+        true
+      ]
+    ],
+    "Template21": [
+      [
+        "str",
+        "int"
+      ]
+    ],
+    "Template22": [
+      [
+        "str"
+      ]
+    ],
+    "Template23": [
+      [
+        true,
+        "str",
+        false,
+        false
+      ],
+      [
+        true,
+        "str",
+        true,
+        false
+      ]
+    ],
+    "Template24": [
+      [
+        "str",
+        false,
+        true
+      ],
+      [
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template24_expr_seq": [
+      [
+        "str",
+        false,
+        true
+      ],
+      [
+        "str",
+        true,
+        true
+      ]
+    ],
+    "Template25": [
+      [
+        "str"
+      ]
+    ],
+    "Template26": [
+      []
+    ],
+    "Template27": [
+      []
+    ],
+    "Template28": [
+      []
+    ],
+    "Template30": [
+      []
+    ],
+    "Template31": [
+      []
+    ],
+    "Template32": [
+      []
+    ],
+    "Template33": [
+      []
+    ],
+    "Template34": [
+      []
+    ],
+    "Template35": [
+      []
+    ],
+    "Template36": [
+      []
+    ],
+    "Template36_expr_seq": [
+      []
+    ],
+    "Template37": [
+      []
+    ],
+    "Template38": [
+      []
+    ],
+    "Template6": [
+      [
+        "str",
+        "int",
+        "str",
+        "str"
+      ]
+    ],
+    "Template8": [
+      []
+    ],
+    "Template9": [
+      []
+    ],
+    "Tuple": [
+      [
+        true
+      ]
+    ],
+    "USub": [
+      []
+    ],
+    "UnaryOp": [
+      [
+        true,
+        true
+      ]
+    ],
+    "alias": [
+      [
+        "str",
+        false
+      ]
+    ],
+    "arg": [
+      [
+        "str",
+        false
+      ]
+    ],
+    "arguments": [
+      [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    ],
+    "comprehension": [
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "keyword": [
+      [
+        "str",
+        true
+      ]
+    ]
+  },
+  "primitive_types": [
+    "NoneType",
+    "bool",
+    "int",
+    "str"
+  ],
+  "seq_lengths": {
+    "alias*": [
+      1,
+      10
+    ],
+    "arg_plus_templates*": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "cmpop*": [
+      1
+    ],
+    "comprehension*": [
+      1
+    ],
+    "expr*": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "keyword_plus_templates*": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "stmt*": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      11
+    ]
+  },
+  "sum_type_constructors": {
+    "arg_plus_templates_seq_elem": [
+      "Template28",
+      "arg"
+    ],
+    "arguments_plus_templates": [
+      "Template13",
+      "Template8",
+      "Template9",
+      "arguments"
+    ],
+    "boolop": [
+      "And",
+      "Or"
+    ],
+    "cmpop_seq_elem": [
+      "Eq",
+      "Gt",
+      "GtE",
+      "In",
+      "Is",
+      "IsNot",
+      "Lt",
+      "LtE",
+      "NotEq"
+    ],
+    "expr": [
+      "Attribute",
+      "BinOp",
+      "BoolOp",
+      "Call",
+      "Compare",
+      "Lambda",
+      "List",
+      "ListComp",
+      "Name",
+      "NameConstant",
+      "Num",
+      "Subscript",
+      "Template17",
+      "Template18",
+      "Template19",
+      "Template21",
+      "Template24",
+      "Template25",
+      "Template30",
+      "Template32",
+      "Template33",
+      "Template34",
+      "Template35",
+      "Template36",
+      "Template37",
+      "Template38",
+      "Tuple",
+      "UnaryOp"
+    ],
+    "expr_seq_elem": [
+      "Attribute",
+      "BinOp",
+      "BoolOp",
+      "Call",
+      "Compare",
+      "Lambda",
+      "List",
+      "ListComp",
+      "Name",
+      "NameConstant",
+      "Num",
+      "Str",
+      "Subscript",
+      "Template17",
+      "Template19",
+      "Template21",
+      "Template24",
+      "Template24_expr_seq",
+      "Template25",
+      "Template26",
+      "Template27",
+      "Template31",
+      "Template32",
+      "Template33",
+      "Template34",
+      "Template35",
+      "Template36_expr_seq",
+      "Template37",
+      "Template38",
+      "UnaryOp"
+    ],
+    "keyword_plus_templates_seq_elem": [
+      "Template22",
+      "keyword"
+    ],
+    "mod": [
+      "Template0"
+    ],
+    "operator": [
+      "Add",
+      "Sub"
+    ],
+    "slice": [
+      "Index",
+      "Slice"
+    ],
+    "stmt_seq_elem": [
+      "Assign",
+      "AugAssign",
+      "Break",
+      "ClassDef",
+      "Expr",
+      "For",
+      "FunctionDef",
+      "If",
+      "ImportFrom",
+      "Return",
+      "Template10",
+      "Template14",
+      "Template16",
+      "Template2",
+      "Template20",
+      "Template23",
+      "Template6"
+    ],
+    "unaryop": [
+      "Not",
+      "USub"
+    ]
+  }
+}
