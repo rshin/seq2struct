@@ -34,7 +34,7 @@ def main():
             to_add, validation_info = model_preproc.validate_item(item, section)
             if to_add:
                 model_preproc.add_item(item, section, validation_info)
-       model_preproc.save()
+    model_preproc.save()
 
 
 if __name__ == '__main__':

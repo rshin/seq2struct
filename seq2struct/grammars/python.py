@@ -75,6 +75,8 @@ class PythonGrammar:
 
     @classmethod
     def from_native_ast(cls, node):
+        if not isinstance(node, ast.AST):
+            return node
         # type: (ast.AST) -> Dict[str, Any]
         node_type = node.__class__.__name__
         field_infos = {
@@ -92,8 +94,6 @@ class PythonGrammar:
                 assert field_info.seq
                 if value:
                     result[field] = [cls.from_native_ast(v) for v in value]
-            elif not isinstance(value, ast.AST):
-                result[field] = value
             else:
                 result[field] = cls.from_native_ast(value)
         return result

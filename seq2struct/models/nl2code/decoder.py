@@ -444,19 +444,6 @@ class NL2CodeDecoder(torch.nn.Module):
             node = item.node
             parent_field_type = item.parent_field_type
 
-            if parent_field_type in asdl.builtin_types:
-                # identifier, int, string, bytes, object, singleton
-                # - could be bytes, str, int, float, bool, NoneType
-                # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
-                # - at decoding time, cast back to str/int/float/bool
-                field_type = type(node).__name__
-                field_value_split = self.preproc.grammar.tokenize_field_value(node) + [
-                        vocab.EOS]
-
-                for token in field_value_split:
-                    traversal.step(token)
-                continue
-
             if isinstance(node, (list, tuple)):
                 node_type = parent_field_type + '*'
                 rule = (node_type, len(node))
@@ -472,6 +459,19 @@ class NL2CodeDecoder(torch.nn.Module):
                             node=elem,
                             parent_field_type=parent_field_type,
                         ))
+                continue
+
+            if parent_field_type in asdl.builtin_types:
+                # identifier, int, string, bytes, object, singleton
+                # - could be bytes, str, int, float, bool, NoneType
+                # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
+                # - at decoding time, cast back to str/int/float/bool
+                field_type = type(node).__name__
+                field_value_split = self.preproc.grammar.tokenize_field_value(node) + [
+                        vocab.EOS]
+
+                for token in field_value_split:
+                    traversal.step(token)
                 continue
 
             type_info = self.ast_wrapper.singular_types[node['_type']]
@@ -929,19 +929,23 @@ class TreeTraversal:
                 elem_type = self.cur_item.node_type
                 assert list_type == elem_type + '*'
 
+                child_node_type = elem_type
+                if elem_type in self.model.ast_wrapper.sum_types:
+                    child_state = SUM_TYPE_INQUIRE
+                    if self.model.preproc.use_seq_elem_rules:
+                        child_node_type = elem_type + '_seq_elem'
+                elif elem_type in self.model.ast_wrapper.product_types:
+                    child_state = CHILDREN_INQUIRE
+                elif elem_type == 'identifier':
+                    child_state = GEN_TOKEN
+                    child_node_type = 'str'
+                elif elem_type in asdl.builtin_types:
+                    # TODO: Fix this
+                    raise ValueError('sequential builtin types not supported')
+                else:
+                    raise ValueError('Unable to handle seq field type {}'.format(elem_type))
+
                 for i in range(num_children):
-                    child_node_type = elem_type
-                    if elem_type in self.model.ast_wrapper.sum_types:
-                        child_state = SUM_TYPE_INQUIRE
-                        if self.model.preproc.use_seq_elem_rules:
-                            child_node_type = elem_type + '_seq_elem'
-                    elif elem_type in self.model.ast_wrapper.product_types:
-                        child_state = CHILDREN_INQUIRE
-                    elif elem_type in asdl.builtin_types:
-                        # TODO: Fix this
-                        raise ValueError('sequential builtin types not supported')
-                    else:
-                        raise ValueError('Unable to handle seq field type {}'.format(elem_type))
                     self.queue = self.queue.append(TreeTraversal.QueueItem(
                         state=child_state,
                         node_type=child_node_type,
