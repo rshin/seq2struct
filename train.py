@@ -64,7 +64,8 @@ def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eva
 
     # Divide each stat by 'total'
     for k in stats:
-        stats[k] /= stats['total']
+        if k != 'total':
+            stats[k] /= stats['total']
     del stats['total']
 
     logger.log("Step {} stats, {}: {}".format(
