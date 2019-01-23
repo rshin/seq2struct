@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--config-args')
 
+    parser.add_argument('--step', type=int)
     parser.add_argument('--section', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--beam-size', required=True, type=int)
@@ -53,13 +54,17 @@ def main():
 
     # 2. Restore its parameters
     saver = saver_mod.Saver(model, optimizer)
-    last_step = saver.restore(args.logdir)
+    last_step = saver.restore(args.logdir, step=args.step)
 
     # 3. Get training data somewhere
     output = open(args.output, 'w')
     data = registry.construct('dataset', config['data'][args.section])
+    if args.limit:
+        sliced_data = itertools.islice(data, args.limit)
+    else:
+        sliced_data = data
 
-    for i, item in enumerate(tqdm.tqdm(itertools.islice(data, args.limit))):
+    for i, item in enumerate(tqdm.tqdm(sliced_data)):
         beams = beam_search.beam_search(
                 model, item, beam_size=args.beam_size, max_steps=1000)
 
@@ -72,8 +77,8 @@ def main():
                 'inferred_code': inferred_code,
 
                 'score': beam.score,
-                'choice_history': beam.choice_history,
-                'score_history': beam.score_history,
+                #'choice_history': beam.choice_history,
+                #'score_history': beam.score_history,
             })
 
         output.write(
