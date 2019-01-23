@@ -16,10 +16,14 @@ class HoleType(enum.Enum):
     AddChild = 2
 
 
+class MissingValue:
+    pass
+
+
 @registry.register('grammar', 'idiom_ast')
 class IdiomAstGrammar:
 
-    def __init__(self, base_grammar, template_file):
+    def __init__(self, base_grammar, template_file, root_type=None):
         self.base_grammar = registry.construct('grammar', base_grammar)
         self.templates = json.load(open(template_file))
 
@@ -28,6 +32,8 @@ class IdiomAstGrammar:
         self.root_type = self.base_grammar.root_type
         if base_grammar['name'] == 'python':
             self.root_type = 'mod'
+        if root_type is not None:
+            self.root_type = root_type
 
         singular_types_with_single_seq_field = set(
             name for name, type_info in self.ast_wrapper.singular_types.items()
@@ -59,8 +65,13 @@ class IdiomAstGrammar:
             constructors, seq_fragment_constructors = [], []
             for template, is_seq_fragment in templates:
                 if is_seq_fragment:
+                    if head_type in self.ast_wrapper.product_types:
+                        seq_type = '{}_plus_templates'.format(head_type)
+                    else:
+                        seq_type = head_type
+
                     seq_fragment_constructors.append(
-                        self._template_to_constructor(template, '_{}_seq'.format(head_type)))
+                        self._template_to_constructor(template, '_{}_seq'.format(seq_type)))
                 else:
                     constructors.append(self._template_to_constructor(template))
 
@@ -82,9 +93,9 @@ class IdiomAstGrammar:
 
             # product type
             elif head_type in self.ast_wrapper.product_types:
-                assert constructors
-                if seq_fragment_constructors:
-                    raise NotImplementedError('seq fragments of product types not supported: {}'.format(head_type))
+                #assert constructors
+                #if seq_fragment_constructors:
+                #    raise NotImplementedError('seq fragments of product types not supported: {}'.format(head_type))
 
                 # Replace Product with Constructor
                 # - make a Constructor
@@ -100,6 +111,8 @@ class IdiomAstGrammar:
                 self.ast_wrapper.add_sum_type(
                     name,
                     asdl.Sum(types=constructors + [new_constructor_for_prod_type]))
+                # Add seq fragment constructors
+                self.ast_wrapper.add_seq_fragment_type(name, seq_fragment_constructors)
 
                 # Replace every occurrence of the product type in the grammar
                 types_to_replace[head_type] = name
@@ -123,7 +136,7 @@ class IdiomAstGrammar:
 
     def parse(self, code, section):
         if section == 'train':
-            return self.convert_idiom_ast(code, has_hole_info=False)()
+            return self.convert_idiom_ast(code, template_id=None)()
         else:
             return self.base_grammar.parse(code, section)
 
@@ -185,9 +198,10 @@ class IdiomAstGrammar:
         hole_node_types = {}
 
         # Find where the holes occur
-        stack = [template_dict['idiom']]
+        stack = [(None, template_dict['idiom'], None)]
         while stack:
-            node_type, ref_symbols, hole_id, children = stack.pop()
+            parent, node, child_index = stack.pop()
+            node_type, ref_symbols, hole_id, children = node
             if hole_id is not None:
                 assert hole_id not in hole_node_types
                 # node_type could be:
@@ -195,16 +209,47 @@ class IdiomAstGrammar:
                 #   => hole type is same as field's type
                 # - name of type, if it only has one child
                 # - binarizer
-                if '-' in node_type:
-                    type_name, field_name = node_type.split('-') 
-                    type_info = self.ast_wrapper.singular_types[type_name]
-                    field_info, = [field for field in type_info.fields if field.name == field_name]
+                hyphenated_node_type = None
+                unhyphenated_node_type = None
+
+                hole_type_str = template_dict['holes'][hole_id]['type']
+                if hole_type_str == 'AddChild':
+                    node_type_for_field_type = node_type
+
+                elif hole_type_str == 'ReplaceSelf':
+                    # Two types of ReplaceSelf
+                    # 1. Node has a hyphen: should be a repeated field
+                    # 2. Node lacks a hyphen, and
+                    #    2a. node is same as parent: a repeated field
+                    #    2b. node is not the same as parent: an elem
+                    if '-' in node_type:
+                        node_type_for_field_type = node_type
+                    else:
+                        node_type_for_field_type = parent[0]
+                        #if '-' in parent_type:
+                        #    hyphenated_node_type = parent_type
+                        #else:
+                        #    unhyphenated_node_type = parent_type
+
+                field_info = self._get_field_info_from_name(node_type_for_field_type)
+
+                # Check for situations like 
+                # Call-args
+                # |       \
+                # List[0] Call-args[1]
+                #
+                # Tuple
+                # |       \
+                # Tuple[0] Tuple[1]
+                # where hole 0 should not be a sequence.
+
+                if field_info.seq and hole_type_str == 'ReplaceSelf' and '-' not in node_type:
+                    assert child_index in (0, 1)
+                    seq = child_index == 1
                 else:
-                    type_info = self.ast_wrapper.singular_types[node_type]
-                    assert len(type_info.fields) == 1
-                    field_info = type_info.fields[0]
-                hole_node_types[hole_id] = (field_info.type, field_info.seq, field_info.opt)
-            stack += children
+                    seq = field_info.seq
+                hole_node_types[hole_id] = (field_info.type, seq, field_info.opt)
+            stack += [(node, child, i) for i, child in enumerate(children)]
         
         # Create fields for the holes
         fields = []
@@ -216,12 +261,23 @@ class IdiomAstGrammar:
             fields.append(field)
 
         constructor = asdl.Constructor('Template{}{}'.format(template_dict['id'], suffix), fields)
-        constructor.template = self.convert_idiom_ast(template_dict['idiom'], has_hole_info=True)
+        constructor.template = self.convert_idiom_ast(template_dict['idiom'], template_id=template_dict['id'])
 
         return constructor
 
-    def convert_idiom_ast(self, idiom_ast, has_hole_info, seq_fragment_type=None):
-        if has_hole_info:
+    def _get_field_info_from_name(self, node_type):
+        if '-' in node_type:
+            type_name, field_name = node_type.split('-') 
+            type_info = self.ast_wrapper.singular_types[type_name]
+            field_info, = [field for field in type_info.fields if field.name == field_name]
+        else:
+            type_info = self.ast_wrapper.singular_types[node_type]
+            assert len(type_info.fields) == 1
+            field_info = type_info.fields[0]
+        return field_info
+
+    def convert_idiom_ast(self, idiom_ast, template_id=None, seq_fragment_type=None):
+        if template_id is not  None:
             node_type, ref_symbols, hole, children = idiom_ast
         else:
             node_type, ref_symbols, children = idiom_ast
@@ -249,16 +305,16 @@ class IdiomAstGrammar:
         if is_template_node:
             assert len(children) == len(type_info.fields)
             for field, child in zip(type_info.fields, children):
-                if field.hole_type == HoleType.ReplaceSelf:
+                if field.hole_type == HoleType.ReplaceSelf and  field.seq:
                     children_to_convert.append((field, child))
-                elif field.hole_type == HoleType.AddChild:
+                else:
                     assert not field.seq
                     dummy_node = list(idiom_ast)
                     dummy_node[0] = '{}-{}'.format(node_type, field.name)
                     dummy_node[-1] = [child]
                     children_to_convert.append((field, dummy_node))
-                else:
-                    raise ValueError('Unexpected hole_type: {}'.format(field.hole_type))
+               # else:
+               #     raise ValueError('Unexpected hole_type: {}'.format(field.hole_type))
         else:
             fields_by_name = {f.name: f for f in type_info.fields}
             if len(type_info.fields) == 0:
@@ -273,6 +329,9 @@ class IdiomAstGrammar:
         assert set(field.name for field, _ in children_to_convert) == set(field.name for field in type_info.fields)
 
         def result_creator(hole_values={}):
+            if template_id is not None and hole is not None and self.templates[template_id]['holes'][hole]['type'] == 'ReplaceSelf':
+                return hole_values.get(hole, MissingValue)
+
             result = {}
             for field, child_node in children_to_convert:
                 # field: ast.Field object representing the field in the ASDL Constructor/Product
@@ -286,22 +345,28 @@ class IdiomAstGrammar:
                     convert = lambda node: (lambda hole_values: self.convert_builtin_type(field.type, node[0]))
                 else:
                     convert = functools.partial(
-                        self.convert_idiom_ast, has_hole_info=has_hole_info)
+                        self.convert_idiom_ast, template_id=template_id)
 
                 if field.seq:
                     value = []
                     while True:
                         # child_node[2]: ID of hole
-                        if has_hole_info and child_node[2] is not None:
+                        if template_id is not None and child_node[2] is not None:
                             hole_value =  hole_values.get(child_node[2], [])
+                            assert isinstance(hole_value, list)
                             value += hole_value
+                            #if value:
+                            #    assert isinstance(hole_value, list)
+                            #    value += hole_value
+                            #else:
+                            #    return hole_value
                             assert len(child_node[-1]) == 0
                             break
 
                         child_type, child_children = child_node[0], child_node[-1]
                         if isinstance(child_type, dict):
                             # Another template
-                            value.append(convert(child_node, seq_fragment_type=field.type)(hole_values))
+                            value.append(convert(child_node, seq_fragment_type=field.type if field.seq else None)(hole_values))
                             break
                         # If control reaches here, child_node is a binarizer node
                         if len(child_children) == 1:
@@ -316,7 +381,7 @@ class IdiomAstGrammar:
                     present = bool(value)
                 elif field.opt:
                     # child_node[2]: ID of hole
-                    if has_hole_info and child_node[2] is not None:
+                    if template_id is not None and child_node[2] is not None:
                         assert len(child_node[-1]) == 0
                         present = child_node[2] in hole_values
                         value = hole_values.get(child_node[2])
@@ -328,9 +393,9 @@ class IdiomAstGrammar:
                             present = False
                         else:
                             value = convert(child_node[-1][0])(hole_values)
-                            present = True
+                            present = value is not MissingValue
                 else:
-                    if has_hole_info and child_node[2] is not None:
+                    if template_id is not None and child_node[2] is not None:
                         assert len(child_node[-1]) == 0
                         value = hole_values[child_node[2]]
                         present = True
