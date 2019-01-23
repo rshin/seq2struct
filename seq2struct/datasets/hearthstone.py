@@ -91,6 +91,9 @@ class HearthstoneDataset(torch.utils.data.Dataset):
             else:
                 gold_code = obsolete_gold_code
 
+            if inferred_code is None:
+                inferred_code = ''
+
             # Both of these should be canonicalized
             exact_match = gold_code == inferred_code
 

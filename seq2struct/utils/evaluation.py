@@ -14,7 +14,10 @@ def compute_metrics(config_path, section, inferred_path):
 
     for line in inferred:
         infer_results = json.loads(line)
-        inferred_code = infer_results['beams'][0]['inferred_code']
+        if infer_results['beams']:
+            inferred_code = infer_results['beams'][0]['inferred_code']
+        else:
+            inferred_code = None
         if 'index' in infer_results:
             metrics.add(data[infer_results['index']], inferred_code)
         else:
