@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--section', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--beam-size', required=True, type=int)
+    parser.add_argument('--output-history', action='store_true')
     parser.add_argument('--limit', type=int)
     args = parser.parse_args()
 
@@ -55,6 +56,8 @@ def main():
     # 2. Restore its parameters
     saver = saver_mod.Saver(model, optimizer)
     last_step = saver.restore(args.logdir, step=args.step)
+    if not last_step:
+        raise Exception('Attempting to infer on untrained model')
 
     # 3. Get training data somewhere
     output = open(args.output, 'w')
@@ -64,29 +67,30 @@ def main():
     else:
         sliced_data = data
 
-    for i, item in enumerate(tqdm.tqdm(sliced_data)):
-        beams = beam_search.beam_search(
-                model, item, beam_size=args.beam_size, max_steps=1000)
+    with torch.no_grad():
+        for i, item in enumerate(tqdm.tqdm(sliced_data)):
+            beams = beam_search.beam_search(
+                    model, item, beam_size=args.beam_size, max_steps=1000)
 
-        decoded = []
-        for beam in beams:
-            model_output, inferred_code = beam.inference_state.finalize()
+            decoded = []
+            for beam in beams:
+                model_output, inferred_code = beam.inference_state.finalize()
 
-            decoded.append({
-                'model_output': model_output,
-                'inferred_code': inferred_code,
+                decoded.append({
+                    'model_output': model_output,
+                    'inferred_code': inferred_code,
+                    'score': beam.score,
+                    **({
+                        'choice_history': beam.choice_history,
+                        'score_history': beam.score_history,
+                    } if args.output_history else {})})
 
-                'score': beam.score,
-                #'choice_history': beam.choice_history,
-                #'score_history': beam.score_history,
-            })
-
-        output.write(
-            json.dumps({
-                'index': i,
-                'beams': decoded,
-            }) + '\n')
-        output.flush()
+            output.write(
+                json.dumps({
+                    'index': i,
+                    'beams': decoded,
+                }) + '\n')
+            output.flush()
 
 
 if __name__ == '__main__':
