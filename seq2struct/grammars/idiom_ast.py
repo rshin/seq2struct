@@ -118,7 +118,7 @@ class IdiomAstGrammar:
                 types_to_replace[head_type] = name
             
             # built-in type
-            elif head_type in asdl.builtin_types:
+            elif head_type in self.ast_wrapper.primitive_types:
                 raise NotImplementedError(
                     'built-in type as head type of idiom unsupported: {}'.format(head_type))
                 # Define a new sum type
@@ -341,7 +341,7 @@ class IdiomAstGrammar:
                 #   - 0: should never happen
                 #   - 1: for regular fields, opt fields, seq fields if length is 0 or represented by a template node
                 #   - 2: for seq fields of length >= 1
-                if field.type in asdl.builtin_types:
+                if field.type in self.ast_wrapper.primitive_types:
                     convert = lambda node: (lambda hole_values: self.convert_builtin_type(field.type, node[0]))
                 else:
                     convert = functools.partial(

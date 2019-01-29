@@ -2,6 +2,7 @@ import ast
 import collections
 import collections.abc
 import enum
+import itertools
 import json
 import os
 import re
@@ -206,6 +207,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             # |  identifier name, arguments args, stmt* body, expr* decorator_list, expr returns
             assert node_type in self.ast_wrapper.singular_types
             field_presence_info = get_field_presence_info(
+                    self.ast_wrapper,
                     node,
                     self.ast_wrapper.singular_types[node_type].fields)
             self.field_presence_infos[node_type].add(field_presence_info)
@@ -278,7 +280,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
 
             for field_info in reversed(type_info.fields):
                 field_value = node.get(field_info.name)
-                if field_info.type in asdl.builtin_types:
+                if field_info.type in self.ast_wrapper.primitive_types:
                     for token in self.grammar.tokenize_field_value(field_value):
                         yield token
                 elif isinstance(field_value, (list, tuple)):
@@ -328,6 +330,7 @@ class NL2CodeDecoder(torch.nn.Module):
         if self.preproc.use_seq_elem_rules:
             self.node_type_vocab = vocab.Vocab(
                     sorted(self.preproc.primitive_types) +
+                    sorted(self.ast_wrapper.custom_primitive_types) +
                     sorted(self.preproc.sum_type_constructors.keys()) +
                     sorted(self.preproc.field_presence_infos.keys()) +
                     sorted(self.preproc.seq_lengths.keys()),
@@ -335,6 +338,7 @@ class NL2CodeDecoder(torch.nn.Module):
         else:
             self.node_type_vocab = vocab.Vocab(
                     sorted(self.preproc.primitive_types) +
+                    sorted(self.ast_wrapper.custom_primitive_types) +
                     sorted(self.ast_wrapper.sum_types.keys()) +
                     sorted(self.ast_wrapper.singular_types.keys()) +
                     sorted(self.preproc.seq_lengths.keys()),
@@ -377,6 +381,15 @@ class NL2CodeDecoder(torch.nn.Module):
         else:
             # TODO: Figure out how to get right sizes (query, key) to module
             self.copy_pointer = copy_pointer
+        
+        self.pointers = torch.nn.ModuleDict()
+        self.pointer_action_emb_proj = torch.nn.ModuleDict()
+        for pointer_type in self.preproc.grammar.pointers:
+            self.pointers[pointer_type] = attention.ScaledDotProductPointer(
+                    query_size=self.recurrent_size,
+                    key_size=self.enc_recurrent_size)
+            self.pointer_action_emb_proj[pointer_type] = torch.nn.Linear(
+                    self.recurrent_size, self.rule_emb_size)
 
         self.node_type_embedding = torch.nn.Embedding(
                 num_embeddings=len(self.node_type_vocab),
@@ -448,6 +461,7 @@ class NL2CodeDecoder(torch.nn.Module):
                 node_type = parent_field_type + '*'
                 rule = (node_type, len(node))
                 rule_idx = self.rules_index[rule]
+                assert traversal.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY
                 traversal.step(rule_idx)
 
                 if self.preproc.use_seq_elem_rules and parent_field_type in self.ast_wrapper.sum_types:
@@ -461,7 +475,13 @@ class NL2CodeDecoder(torch.nn.Module):
                         ))
                 continue
 
-            if parent_field_type in asdl.builtin_types:
+            if parent_field_type in self.preproc.grammar.pointers:
+                assert isinstance(node, int)
+                assert traversal.cur_item.state == TreeTraversal.State.POINTER_APPLY
+                traversal.step(node)
+                continue
+
+            if parent_field_type in self.ast_wrapper.primitive_types:
                 # identifier, int, string, bytes, object, singleton
                 # - could be bytes, str, int, float, bool, NoneType
                 # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
@@ -471,29 +491,33 @@ class NL2CodeDecoder(torch.nn.Module):
                         vocab.EOS]
 
                 for token in field_value_split:
+                    assert traversal.cur_item.state == TreeTraversal.State.GEN_TOKEN
                     traversal.step(token)
                 continue
-
+            
             type_info = self.ast_wrapper.singular_types[node['_type']]
 
             if parent_field_type in self.preproc.sum_type_constructors:
                 # ApplyRule, like expr -> Call
                 rule = (parent_field_type, type_info.name)
                 rule_idx = self.rules_index[rule]
+                assert traversal.cur_item.state == TreeTraversal.State.SUM_TYPE_APPLY
                 traversal.step(rule_idx)
 
             if type_info.fields:
                 # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
                 # Figure out which rule needs to be applied
-                present = get_field_presence_info(node, type_info.fields)
+                present = get_field_presence_info(self.ast_wrapper, node, type_info.fields)
                 rule = (node['_type'], tuple(present))
                 rule_idx = self.rules_index[rule]
+                assert traversal.cur_item.state == TreeTraversal.State.CHILDREN_APPLY
                 traversal.step(rule_idx)
 
             # reversed so that we perform a DFS in left-to-right order
             for field_info in reversed(type_info.fields):
                 if field_info.name not in node:
                     continue
+
                 queue.append(
                     TreeState(
                         node=node[field_info.name],
@@ -519,8 +543,8 @@ class NL2CodeDecoder(torch.nn.Module):
     
     def _index(self, vocab, word):
         return self._tensor([vocab.index(word)])
-
-    def apply_rule(
+    
+    def _update_state(
             self,
             node_type,
             prev_state,
@@ -546,6 +570,18 @@ class NL2CodeDecoder(torch.nn.Module):
         new_state = self.state_update(
                 # state_input shape: batch (=1) x (emb_size * 5)
                 state_input, prev_state)
+        return new_state
+
+    def apply_rule(
+            self,
+            node_type,
+            prev_state,
+            prev_action_emb,
+            parent_h,
+            parent_action_emb,
+            desc_enc):
+        new_state = self._update_state(
+            node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
         output = new_state[0]
         # rule_logits shape: batch (=1) x num choices
@@ -562,15 +598,6 @@ class NL2CodeDecoder(torch.nn.Module):
             range(rules_start, rules_end),
             rule_logprobs[0, rules_start:rules_end]))
 
-    def apply_rule_loss(self, rule_logits, rule_idx):
-        # rule_idx shape: batch (=1)
-        rule_idx = self._tensor([rule_idx])
-        # action_emb shape: batch (=1) x emb_size
-        action_emb = self.rule_embedding(rule_idx)
-        # loss_piece shape: batch (=1)
-        loss_piece = self.xent_loss(rule_logits, rule_idx)
-        return loss_piece
-    
     def gen_token(
             self,
             node_type,
@@ -579,24 +606,8 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_h,
             parent_action_emb,
             desc_enc):
-        # desc_context shape: batch (=1) x emb_size
-        desc_context, _ = self._desc_attention(prev_state, desc_enc)
-        # node_type_emb shape: batch (=1) x emb_size
-        node_type_emb = self.node_type_embedding(
-                self._index(self.node_type_vocab, node_type))
-                
-        state_input = torch.cat(
-            (
-                prev_action_emb,  # a_{t-1}: rule_emb_size
-                desc_context,  # c_t: enc_recurrent_size
-                parent_h,  # s_{p_t}: recurrent_size
-                parent_action_emb,  # a_{p_t}: rule_emb_size
-                node_type_emb,  # n_{f-t}: node_emb_size
-            ),
-            dim=-1)
-        # state_input shape: batch (=1) x (emb_size * 5)
-        new_state = self.state_update(
-                state_input, prev_state)
+        new_state = self._update_state(
+            node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
         output = new_state[0]
 
@@ -693,16 +704,41 @@ class NL2CodeDecoder(torch.nn.Module):
             ((self.terminal_vocab[idx], token_logprobs[0, idx]) for idx in range(token_logprobs.shape[1])))
         
         return list(log_prob_by_word.items())
+    
+    def compute_pointer(
+            self,
+            node_type,
+            prev_state,
+            prev_action_emb,
+            parent_h,
+            parent_action_emb,
+            desc_enc):
+        new_state = self._update_state(
+            node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
+        # output shape: batch (=1) x emb_size
+        output = new_state[0]
+        # pointer_logits shape: batch (=1) x num choices
+        pointer_logits = self.pointers[node_type](
+            output, desc_enc.pointer_memories[node_type])
+
+        return output, new_state, pointer_logits
+    
+    def pointer_infer(self, node_type, logits):
+        logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
+        return list(zip(
+            # TODO batching
+            range(logits.shape[1]),
+            logprobs))
 
 
-def get_field_presence_info(node, field_infos):
+def get_field_presence_info(ast_wrapper, node, field_infos):
     present = []
     for field_info in field_infos:
         field_value = node.get(field_info.name)
         is_present = field_value is not None and field_value != []
 
         maybe_missing = field_info.opt or field_info.seq
-        is_builtin_type = field_info.type in asdl.builtin_types
+        is_builtin_type = field_info.type in ast_wrapper.primitive_types
 
         if maybe_missing and is_builtin_type:
             # TODO: make it posible to deal with "singleton?"
@@ -726,20 +762,21 @@ class TreeTraversal:
         parent_action_emb = attr.ib()
         parent_h = attr.ib()
         parent_field_name = attr.ib()
+
+        def to_str(self):
+            return '<state: {}, node_type: {}, parent_field_name: {}>'.format(self.state, self.node_type, self.parent_field_name)
     
     class State(enum.Enum):
         SUM_TYPE_INQUIRE = 0
         SUM_TYPE_APPLY = 1
-
         CHILDREN_INQUIRE = 2
         CHILDREN_APPLY = 3
-
         LIST_LENGTH_INQUIRE = 4
         LIST_LENGTH_APPLY = 5
-
         GEN_TOKEN = 6
-
-        NODE_FINISHED = 7
+        POINTER_INQUIRE = 7
+        POINTER_APPLY = 8
+        NODE_FINISHED = 9
 
     class PrevActionTypes(enum.Enum):
         APPLY_RULE = 0
@@ -770,7 +807,7 @@ class TreeTraversal:
                 parent_h=self.model.zero_recurrent_emb,
                 parent_field_name=None)
 
-        self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
+        self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
 
     def clone(self):
         other = self.__class__(None, None)
@@ -781,7 +818,7 @@ class TreeTraversal:
         other.queue = self.queue
         other.cur_item = self.cur_item
         other.actions = self.actions
-        other.update_prev_action_emb_type = self.update_prev_action_emb_type
+        other.update_prev_action_emb = self.update_prev_action_emb
         return other
 
     def step(self, last_choice):
@@ -792,6 +829,8 @@ class TreeTraversal:
         LIST_LENGTH_INQUIRE = TreeTraversal.State.LIST_LENGTH_INQUIRE
         LIST_LENGTH_APPLY   = TreeTraversal.State.LIST_LENGTH_APPLY
         GEN_TOKEN           = TreeTraversal.State.GEN_TOKEN
+        POINTER_INQUIRE     = TreeTraversal.State.POINTER_INQUIRE
+        POINTER_APPLY       = TreeTraversal.State.POINTER_APPLY
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
         while True:
@@ -812,7 +851,7 @@ class TreeTraversal:
                         state=SUM_TYPE_APPLY,
                         parent_h=output)
 
-                self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
+                self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
                 return self.rule_choice(self.cur_item.node_type, rule_logits)
 
             elif self.cur_item.state == SUM_TYPE_APPLY:
@@ -853,7 +892,7 @@ class TreeTraversal:
                         state=CHILDREN_APPLY,
                         parent_h=output)
 
-                self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
+                self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
                 return self.rule_choice(self.cur_item.node_type, rule_logits)
             
             elif self.cur_item.state == CHILDREN_APPLY:
@@ -888,7 +927,9 @@ class TreeTraversal:
                     elif field_type in self.model.ast_wrapper.product_types:
                         assert self.model.ast_wrapper.product_types[field_type].fields
                         child_state = CHILDREN_INQUIRE
-                    elif field_type in asdl.builtin_types:
+                    elif field_type in self.model.preproc.grammar.pointers:
+                        child_state = POINTER_INQUIRE
+                    elif field_type in self.model.ast_wrapper.primitive_types:
                         child_state = GEN_TOKEN
                         child_type = present
                     else:
@@ -921,7 +962,7 @@ class TreeTraversal:
                         state=LIST_LENGTH_APPLY,
                         parent_h=output)
 
-                self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.APPLY_RULE
+                self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
                 return self.rule_choice(list_type, rule_logits)
             
             elif self.cur_item.state == LIST_LENGTH_APPLY:
@@ -939,7 +980,7 @@ class TreeTraversal:
                 elif elem_type == 'identifier':
                     child_state = GEN_TOKEN
                     child_node_type = 'str'
-                elif elem_type in asdl.builtin_types:
+                elif elem_type in self.model.ast_wrapper.primitive_types:
                     # TODO: Fix this
                     raise ValueError('sequential builtin types not supported')
                 else:
@@ -974,8 +1015,32 @@ class TreeTraversal:
                         self.cur_item.parent_h,
                         self.cur_item.parent_action_emb,
                         self.desc_enc)
-                self.update_prev_action_emb_type = TreeTraversal.PrevActionTypes.GEN_TOKEN
+                self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_gen_token
                 return self.token_choice(output, gen_logodds)
+            
+            elif self.cur_item.state == POINTER_INQUIRE:
+                # a. Ask which one to choose
+                output, self.recurrent_state, logits = self.model.compute_pointer(
+                        self.cur_item.node_type, 
+                        self.recurrent_state,
+                        self.prev_action_emb,
+                        self.cur_item.parent_h, 
+                        self.cur_item.parent_action_emb,
+                        self.desc_enc)
+                self.cur_item = attr.evolve(
+                        self.cur_item,
+                        state=POINTER_APPLY,
+                        parent_h=output)
+
+                self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_pointer
+                return self.pointer_choice(self.cur_item.node_type, logits)
+            
+            elif self.cur_item.state == POINTER_APPLY:
+                if self.pop():
+                    last_choice = None
+                    continue
+                else:
+                    return None
 
             elif self.cur_item.state == NODE_FINISHED:
                 if self.pop():
@@ -990,18 +1055,27 @@ class TreeTraversal:
     def update_using_last_choice(self, last_choice):
         if last_choice is None:
             return
-        if self.update_prev_action_emb_type == TreeTraversal.PrevActionTypes.APPLY_RULE:
-            # rule_idx shape: batch (=1)
-            rule_idx = self.model._tensor([last_choice])
-            # action_emb shape: batch (=1) x emb_size
-            self.prev_action_emb = self.model.rule_embedding(rule_idx)
-        elif self.update_prev_action_emb_type == TreeTraversal.PrevActionTypes.GEN_TOKEN:
-            # token_idx shape: batch (=1), LongTensor
-            token_idx = self.model._index(self.model.terminal_vocab, last_choice)
-            # action_emb shape: batch (=1) x emb_size
-            self.prev_action_emb = self.model.terminal_embedding(token_idx)
-        else:
-            raise ValueError(self.update_prev_action_emb_type)
+        self.update_prev_action_emb(self, last_choice)
+    
+    @classmethod
+    def _update_prev_action_emb_apply_rule(cls, self, last_choice):
+        # rule_idx shape: batch (=1)
+        rule_idx = self.model._tensor([last_choice])
+        # action_emb shape: batch (=1) x emb_size
+        self.prev_action_emb = self.model.rule_embedding(rule_idx)
+    
+    @classmethod
+    def _update_prev_action_emb_gen_token(cls, self, last_choice):
+        # token_idx shape: batch (=1), LongTensor
+        token_idx = self.model._index(self.model.terminal_vocab, last_choice)
+        # action_emb shape: batch (=1) x emb_size
+        self.prev_action_emb = self.model.terminal_embedding(token_idx)
+    
+    @classmethod
+    def _update_prev_action_emb_pointer(cls, self, last_choice):
+        # TODO batching
+        self.prev_action_emb = self.model.pointer_action_emb_proj[self.cur_item.node_type](
+                self.desc_enc.pointer_memories[self.cur_item.node_type][:, last_choice])
 
     def pop(self):
         if self.queue:
@@ -1016,15 +1090,20 @@ class TreeTraversal:
     def token_choice(self, output, gen_logodds):
         raise NotImplementedError
 
+    def pointer_choice(self, node_type, logits):
+        raise NotImplementedError
+
 
 class TrainTreeTraversal(TreeTraversal):
 
     @attr.s(frozen=True)
-    class RuleChoicePoint:
-        node_type = attr.ib()
-        rule_logits = attr.ib()
-        def compute_loss(self, outer, rule_idx):
-            return outer.model.apply_rule_loss(self.rule_logits, rule_idx)
+    class XentChoicePoint:
+        logits = attr.ib()
+        def compute_loss(self, outer, idx):
+            # idx shape: batch (=1)
+            idx = outer.model._tensor([idx])
+            # loss_piece shape: batch (=1)
+            return outer.model.xent_loss(self.logits, idx)
 
     @attr.s(frozen=True)
     class TokenChoicePoint:
@@ -1049,12 +1128,13 @@ class TrainTreeTraversal(TreeTraversal):
         return super_clone
 
     def rule_choice(self, node_type, rule_logits):
-        self.choice_point = self.RuleChoicePoint(node_type, rule_logits)
-        return None
+        self.choice_point = self.XentChoicePoint(rule_logits)
 
     def token_choice(self, output, gen_logodds):
         self.choice_point = self.TokenChoicePoint(output, gen_logodds)
-        return None
+    
+    def pointer_choice(self, node_type, logits):
+        self.choice_point = self.XentChoicePoint(logits)
 
     def update_using_last_choice(self, last_choice):
         super().update_using_last_choice(last_choice)
@@ -1074,6 +1154,7 @@ class InferenceTreeTraversal(TreeTraversal):
     class SetParentField(TreeAction):
         parent_field_name = attr.ib()
         node_type = attr.ib()
+        node_value = attr.ib(default=None)
 
     @attr.s(frozen=True)
     class CreateParentFieldList(TreeAction):
@@ -1122,6 +1203,9 @@ class InferenceTreeTraversal(TreeTraversal):
     def token_choice(self, output, gen_logodds):
         return self.model.token_infer(output, gen_logodds, self.desc_enc)
 
+    def pointer_choice(self, node_type, logits):
+        return self.model.pointer_infer(node_type, logits)
+
     def update_using_last_choice(self, last_choice):
         super().update_using_last_choice(last_choice)
 
@@ -1150,6 +1234,12 @@ class InferenceTreeTraversal(TreeTraversal):
                     self.cur_item.parent_field_name,
                     last_choice))
 
+        elif self.cur_item.state == TreeTraversal.State.POINTER_APPLY:
+            self.actions = self.actions.append(self.SetParentField(
+                    self.cur_item.parent_field_name,
+                    node_type=None,
+                    node_value=last_choice))
+
         # NODE_FINISHED
         elif self.cur_item.state == TreeTraversal.State.NODE_FINISHED:
             self.actions = self.actions.append(self.NodeFinished())
@@ -1159,7 +1249,11 @@ class InferenceTreeTraversal(TreeTraversal):
         stack = []
         for i, action in enumerate(self.actions):
             if isinstance(action, self.SetParentField):
-                new_node = {'_type': action.node_type}
+                if action.node_value is None:
+                    new_node = {'_type': action.node_type}
+                else:
+                    new_node = action.node_value
+
                 if action.parent_field_name is None:
                     # Initial node in tree.
                     assert root is None

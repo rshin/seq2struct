@@ -110,7 +110,3 @@ class NL2CodeEncoder(torch.nn.Module):
             state=state,
             memory=outputs.transpose(0, 1),
             words=desc_words)
-    
-    @classmethod
-    def all_tokens(self, desc_words):
-        return desc_words

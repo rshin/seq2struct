@@ -15,7 +15,7 @@ module Spider
     col_unit = (
       agg_type agg_id,
       -- TODO fix
-      int col_id,
+      column col_id,
       singleton is_distinct
     )
 
@@ -68,7 +68,7 @@ module Spider
     -- }
     sql = (
       select select,
-      from from,
+      --from from,
       cond? where,
       col_unit* group_by,
       order_by? order_by,

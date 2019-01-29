@@ -16,7 +16,7 @@ local PREFIX = 'data/spider-20181217/';
     model: {
         name: 'EncDec',
         encoder: {
-            name: 'NL2Code',
+            name: 'spider',
             dropout: 0.2,
         },   
         decoder: {
@@ -32,6 +32,7 @@ local PREFIX = 'data/spider-20181217/';
             grammar: {
               name: 'spider',
             },
+            use_seq_elem_rules: true,
         },
     },
 
@@ -39,19 +40,16 @@ local PREFIX = 'data/spider-20181217/';
         batch_size: 10,
         eval_batch_size: self.batch_size,
 
-        keep_every_n: 100,
+        keep_every_n: 1000,
         eval_every_n: 100,
         save_every_n: 100,
         report_every_n: 10,
 
-        max_steps: 2650,
-        num_eval_items: 66,
+        max_steps: 40000,
+        num_eval_items: 50,
     },
     optimizer: {
-        name: 'adadelta',
-        lr: 1.0,
-        rho: 0.95,
-        eps: 1e-6,
+        name: 'adam',
     },
 
 }

@@ -11,22 +11,25 @@ def bimap(first, second):
 
 
 def filter_nones(d):
-    return {k: v for k, v in d.items() if v is not None}
+    return {k: v for k, v in d.items() if v is not None and v != []}
 
 
 @registry.register('grammar', 'spider')
 class SpiderLanguage:
 
-    ast_wrapper = ast_util.ASTWrapper(
-            asdl.parse(
-                os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    'Spider.asdl')))
-
     root_type = 'sql'
 
-    #def __init__(self, tables_path):
-    #    pass
+    def __init__(self):
+        self.ast_wrapper = ast_util.ASTWrapper(
+                asdl.parse(
+                    os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        'Spider.asdl')),
+                custom_primitive_type_checkers = {
+                    'column': lambda x: isinstance(x, int)
+                })
+
+        self.pointers = {'column'}
 
     def parse(self, code, section):
         return self.parse_sql(code)
@@ -34,9 +37,14 @@ class SpiderLanguage:
     @classmethod
     def tokenize_field_value(cls, field_value):
         if isinstance(field_value, bytes):
-            return field_value.encode('latin1')
+            field_value_str = field_value.encode('latin1')
+        elif isinstance(field_value, str):
+            field_value_str = field_value
         else:
-            return str(field_value)
+            field_value_str = str(field_value)
+            if field_value_str[0] == '"' and field_value_str[-1] == '"':
+                field_value_str = field_value_str[1:-1]
+        return [field_value_str]
 
     #
     #
@@ -132,7 +140,7 @@ class SpiderLanguage:
         return filter_nones({
                 '_type': 'sql',
                 'select': self.parse_select(sql['select']),
-                'from': self.parse_from(sql['from']),
+                #'from': self.parse_from(sql['from']),
                 'where': self.parse_cond(sql['where'], optional=True),
                 'group_by': [self.parse_col_unit(u) for u in sql['groupBy']],
                 'order_by': self.parse_order_by(sql['orderBy']),

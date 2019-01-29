@@ -68,12 +68,20 @@ SingularType = Union[asdl.Constructor, asdl.Product]
 class ASTWrapper(object):
     '''Provides helper methods on the ASDL AST.'''
 
+    default_primitive_type_checkers = {
+        'identifier': lambda x: isinstance(x, str),
+        'int': lambda x: isinstance(x, int),
+        'string': lambda x: isinstance(x, str),
+        'bytes': lambda x: isinstance(x, bytes),
+        'object': lambda x: isinstance(x, object),
+        'singleton': lambda x: x is True or x is False or x is None
+    }
+
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, ast_def, root_type=None):
+    def __init__(self, ast_def, custom_primitive_type_checkers={}):
         # type: (asdl.Module, str) -> None
         self.ast_def = ast_def
-        self._root_type = root_type
 
         visitor = ASTWrapperVisitor()
         visitor.visit(ast_def)
@@ -82,6 +90,12 @@ class ASTWrapper(object):
         self.sum_types = visitor.sum_types
         self.product_types = visitor.product_types
         self.seq_fragment_constructors = {}
+        self.primitive_type_checkers = {
+            **self.default_primitive_type_checkers,
+            **custom_primitive_type_checkers
+        }
+        self.custom_primitive_types = set(custom_primitive_type_checkers.keys())
+        self.primitive_types = set(self.primitive_type_checkers.keys())
 
         # Product types and constructors:
         # no need to decide upon a further type for these.
@@ -222,24 +236,17 @@ class ASTWrapper(object):
             # Check that each item in this field has the expected type.
             items = node.get(field.name,
                              ()) if field.seq else (node.get(field.name), )
-            item_type = {
-                'identifier': lambda x: isinstance(x, str),
-                'int': lambda x: isinstance(x, int),
-                'string': lambda x: isinstance(x, str),
-                'bytes': lambda x: isinstance(x, bytes),
-                'object': lambda x: isinstance(x, object),
-                'singleton': lambda x: x is True or x is False or x is None
-            }
 
             # pylint: disable=cell-var-from-loop
-            if field.type in item_type:
-                check = item_type[field.type]
+            if field.type in self.primitive_type_checkers:
+                check = self.primitive_type_checkers[field.type]
             else:
                 # pylint: disable=line-too-long
                 check = lambda n: self.verify_ast(n, field.type, field_path + (field.name, ), is_seq=field.seq)  # noqa: E731,E501
 
             for item in items:
-                check(item)
+                assert check(item)
+            return True
 
 # Improve this when mypy supports recursive types.
 Node = Dict[str, Any]
