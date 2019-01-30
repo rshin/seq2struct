@@ -13,6 +13,7 @@ setup(
         'cython~=0.29.1',
         'jsonnet~=0.11.2',
         'nltk~=3.4',
+        'networkx~=2.2',
         'numpy~=1.15.4',
         'pyrsistent~=0.14.9',
         'torch~=0.4.0',

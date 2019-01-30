@@ -247,6 +247,30 @@ class ASTWrapper(object):
             for item in items:
                 assert check(item)
             return True
+    
+    def find_all_descendants_of_type(self, tree, type, descend_pred=lambda field: True):
+        queue = [tree]
+        while queue:
+            node = queue.pop()
+            if not isinstance(node, dict):
+                continue
+            for field_info in self.singular_types[node['_type']].fields:
+                if field_info.opt and field_info.name not in node:
+                    continue
+                if not descend_pred(field_info):
+                    continue
+
+                if field_info.seq:
+                    values = node.get(field_info.name, [])
+                else:
+                    values = [node[field_info.name]]
+
+                if field_info.type == type:
+                    for value in values:
+                        yield value
+                else:
+                    queue.extend(values)
+
 
 # Improve this when mypy supports recursive types.
 Node = Dict[str, Any]

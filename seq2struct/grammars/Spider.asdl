@@ -33,7 +33,7 @@ module Spider
 
     -- table_unit: (table_type, col_unit/sql)
     table_unit = TableUnitSql(sql s)
-               | Table(int table_id)
+               | Table(table table_id)
 
     -- condition: [cond_unit1, 'and'/'or', cond_unit2, ...]
     -- cond_unit: (not_op, op_id, val_unit, val1, val2)
@@ -68,7 +68,7 @@ module Spider
     -- }
     sql = (
       select select,
-      --from from,
+      from from,
       cond? where,
       col_unit* group_by,
       order_by? order_by,
