@@ -140,7 +140,7 @@ class IdiomAstGrammar:
         else:
             return self.base_grammar.parse(code, section)
 
-    def unparse(self, tree):
+    def unparse(self, tree, item):
         expanded_tree = self._expand_templates(tree)
         self.base_ast_wrapper.verify_ast(expanded_tree)
         return self.base_grammar.unparse(expanded_tree)

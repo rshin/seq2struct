@@ -61,7 +61,7 @@ class PythonGrammar:
             return  None
 
     @classmethod
-    def unparse(cls, tree):
+    def unparse(cls, tree, item):
         ast_tree = cls.to_native_ast(tree)
         return astor.to_source(ast_tree)
 

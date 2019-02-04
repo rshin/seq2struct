@@ -37,7 +37,8 @@ def intersperse(delimiter, seq):
 class SpiderLanguage:
 
     root_type = 'sql'
-    pointers = {'column', 'table'}
+    #pointers = {'column', 'table'}
+    pointers = {'column'}
 
     def __init__(self, output_from=False):
         self.ast_wrapper = ast_util.ASTWrapper(
@@ -47,7 +48,7 @@ class SpiderLanguage:
                         'Spider.asdl')),
                 custom_primitive_type_checkers = {
                     'column': lambda x: isinstance(x, int),
-                    'table': lambda x: isinstance(x, int),
+                    #'table': lambda x: isinstance(x, int),
                 })
         self.output_from = output_from
         if not self.output_from:
@@ -58,8 +59,8 @@ class SpiderLanguage:
     def parse(self, code, section):
         return self.parse_sql(code)
 
-    def unparse(self, tree, metadata):
-        unparser = SpiderUnparser(self.ast_wrapper, metadata)
+    def unparse(self, tree, item):
+        unparser = SpiderUnparser(self.ast_wrapper, item.schema)
         return unparser.unparse_sql(tree)
 
     @classmethod

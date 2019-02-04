@@ -13,6 +13,7 @@ class SpiderItem:
     code = attr.ib()
     schema = attr.ib()
     orig = attr.ib()
+    orig_schema = attr.ib()
 
 
 @attr.s
@@ -49,7 +50,8 @@ class SpiderDataset(torch.utils.data.Dataset):
         self.examples = []
         self.schemas = {}
 
-        for schema_dict in json.load(open(tables_path)):
+        schema_dicts  = json.load(open(tables_path))
+        for schema_dict in schema_dicts:
             tables = tuple(
                 Table(id=i, name=name.split(), orig_name=orig_name)
                 for i, (name, orig_name) in enumerate(zip(
@@ -97,6 +99,8 @@ class SpiderDataset(torch.utils.data.Dataset):
             db_id = schema_dict['db_id']
             self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph)
 
+        schema_dicts_by_db = {s['db_id']: s for s in schema_dicts}
+
         for path in paths:
             raw_data = json.load(open(path))
             for entry in raw_data:
@@ -104,7 +108,8 @@ class SpiderDataset(torch.utils.data.Dataset):
                     text=entry['question_toks'],
                     code=entry['sql'],
                     schema=self.schemas[entry['db_id']],
-                    orig=entry)
+                    orig=entry,
+                    orig_schema=schema_dicts_by_db[entry['db_id']])
                 self.examples.append(item)
 
     def __len__(self):

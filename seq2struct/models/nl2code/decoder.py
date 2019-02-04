@@ -526,8 +526,8 @@ class NL2CodeDecoder(torch.nn.Module):
 
         return torch.sum(torch.stack(tuple(traversal.loss), dim=0), dim=0)
 
-    def begin_inference(self, desc_enc):
-        traversal = InferenceTreeTraversal(self, desc_enc)
+    def begin_inference(self, desc_enc, example):
+        traversal = InferenceTreeTraversal(self, desc_enc, example)
         choices = traversal.step(None)
         return traversal, choices
 
@@ -728,7 +728,7 @@ class NL2CodeDecoder(torch.nn.Module):
         return list(zip(
             # TODO batching
             range(logits.shape[1]),
-            logprobs))
+            logprobs[0]))
 
 
 def get_field_presence_info(ast_wrapper, node, field_infos):
@@ -1178,7 +1178,7 @@ class InferenceTreeTraversal(TreeTraversal):
         'str': str,
         'int': int,
         'float': float,
-        'bool': bool,
+        'bool': lambda n: {'True': True, 'False': False}.get(n, False),
     }
  
     SIMPLE_TERMINAL_TYPES_DEFAULT = {
@@ -1188,13 +1188,15 @@ class InferenceTreeTraversal(TreeTraversal):
         'bool': True,
     }
 
-    def __init__(self, model, desc_enc):
+    def __init__(self, model, desc_enc, example=None):
         super().__init__(model, desc_enc)
+        self.example = example
         self.actions = pyrsistent.pvector()
 
     def clone(self):
         super_clone = super().clone()
         super_clone.actions = self.actions
+        super_clone.example = self.example
         return super_clone
 
     def rule_choice(self, node_type, rule_logits):
@@ -1267,8 +1269,10 @@ class InferenceTreeTraversal(TreeTraversal):
                 else:
                     assert isinstance(existing_list, list)
                     current[action.parent_field_name].append(new_node)
-                stack.append(current)
-                current = new_node
+
+                if action.node_value is None:
+                    stack.append(current)
+                    current = new_node
 
             elif isinstance(action, self.CreateParentFieldList):
                 current[action.parent_field_name] = []
@@ -1302,4 +1306,4 @@ class InferenceTreeTraversal(TreeTraversal):
                 raise ValueError(action)
 
         assert not stack
-        return root, self.model.preproc.grammar.unparse(root)
+        return root, self.model.preproc.grammar.unparse(root, self.example)

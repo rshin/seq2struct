@@ -84,4 +84,4 @@ class EncDecModel(torch.nn.Module):
             return None
         enc_input =  self.preproc.enc_preproc.preprocess_item(item, validation_info)
         enc_state = self.encoder(enc_input)
-        return self.decoder.begin_inference(enc_state)
+        return self.decoder.begin_inference(enc_state, item)
