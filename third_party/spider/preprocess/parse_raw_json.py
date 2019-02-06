@@ -3,8 +3,9 @@ import json
 import sqlite3
 import traceback
 import argparse
-from process_sql import get_sql
 
+from third_party.spider.process_sql import get_sql
+from third_party.spider.preprocess.schema import Schema
 
 #TODO: update the following dirs
 #sql_path = 'spider/train.json'
@@ -12,43 +13,6 @@ from process_sql import get_sql
 #output_file = 'train_new.json'
 #table_file = 'spider/tables.json'
 
-
-class Schema:
-    """
-    Simple schema which maps table&column to a unique identifier
-    """
-    def __init__(self, schema, table):
-        self._schema = schema
-        self._table = table
-        self._idMap = self._map(self._schema, self._table)
-
-    @property
-    def schema(self):
-        return self._schema
-
-    @property
-    def idMap(self):
-        return self._idMap
-
-    def _map(self, schema, table):
-        column_names_original = table['column_names_original']
-        table_names_original = table['table_names_original']
-        #print 'column_names_original: ', column_names_original
-        #print 'table_names_original: ', table_names_original
-        for i, (tab_id, col) in enumerate(column_names_original):
-            if tab_id == -1:
-                idMap = {'*': i}
-            else:
-                key = table_names_original[tab_id].lower()
-                val = col.lower()
-                idMap[key + "." + val] = i
-
-        for i, tab in enumerate(table_names_original):
-            key = tab.lower()
-            idMap[key] = i
-
-        return idMap
-    
 
 def get_schemas_from_json(fpath):
     with open(fpath) as f:
