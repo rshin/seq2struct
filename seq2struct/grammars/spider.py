@@ -37,24 +37,33 @@ def intersperse(delimiter, seq):
 class SpiderLanguage:
 
     root_type = 'sql'
-    #pointers = {'column', 'table'}
-    pointers = {'column'}
 
-    def __init__(self, output_from=False):
+    def __init__(self, output_from=False, use_table_pointer=False):
+        if use_table_pointer:
+            custom_primitive_type_checkers = {
+                'column': lambda x: isinstance(x, int),
+                'table': lambda x: isinstance(x, int),
+            }
+            self.pointers = {'column', 'table'}
+        else:
+            custom_primitive_type_checkers = {
+                'column': lambda x: isinstance(x, int),
+            }
+            self.pointers = {'column'}
+
         self.ast_wrapper = ast_util.ASTWrapper(
                 asdl.parse(
                     os.path.join(
                         os.path.dirname(os.path.abspath(__file__)),
                         'Spider.asdl')),
-                custom_primitive_type_checkers = {
-                    'column': lambda x: isinstance(x, int),
-                    #'table': lambda x: isinstance(x, int),
-                })
+                custom_primitive_type_checkers=custom_primitive_type_checkers)
         self.output_from = output_from
         if not self.output_from:
             sql_fields = self.ast_wrapper.product_types['sql'].fields
             assert sql_fields[1].name == 'from'
             del sql_fields[1]
+        if not use_table_pointer:
+            self.ast_wrapper.singular_types['Table'].fields[0].type = 'int'
 
     def parse(self, code, section):
         return self.parse_sql(code)
