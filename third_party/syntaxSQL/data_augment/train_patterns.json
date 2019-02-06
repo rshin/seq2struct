@@ -1,0 +1,447 @@
+[
+
+    {
+         "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * ) DESC LIMIT 1",
+         "Question Patterns": [
+             "which {COLUMN_NAME,0} has most number of {TABLE_NAME,0} ?",
+             "which {COLUMN_NAME,0} is the most frequent {COLUMN_NAME,0}?",
+             "give the {COLUMN_NAME,0} that has the most {TABLE_NAME,0} ."
+         ],
+         "Column Attributes": {"0": ["TXT"]},
+         "Column Identity": {}
+     },
+     {
+         "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,2} WHERE {COLUMN,2} > ( SELECT MIN ( {COLUMN,3} ) {FROM,3} )",
+         "Question Patterns": [
+             "what are the {COLUMN_NAME,0} that have greater {COLUMN_NAME,2} than any {COLUMN_NAME,2} in {TABLE_NAME,0} ?",
+             "which {COLUMN_NAME,0} have greater {COLUMN_NAME,2} than that of any {COLUMN_NAME,2} in {TABLE_NAME,0} ?",
+             "what is the {COLUMN_NAME,0} of all {TABLE_NAME,0} whose {COLUMN_NAME,2} is higher than any {TABLE_NAME,0} ?"
+         ],
+         "Column Attributes": {"0": ["TXT"], "2": ["NUM"], "3": ["NUM"]},
+         "Column Identity": {"3": "2"}
+     },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "how many {COLUMN_NAME,0} did each {TABLE_NAME,0} do, ordered by number of {COLUMN_NAME,0} ?",
+            "show the {COLUMN_NAME,0} and the corresponding number of {TABLE_NAME,0} sorted by the number of {COLUMN_NAME,0} in ascending order .",
+            "return each {COLUMN_NAME,0} with the number of {TABLE_NAME,0} in ascending order of the number of {COLUMN_NAME,0} .",
+            "how many {TABLE_NAME,0} correspond to each {COLUMN_NAME,0}?  show the result in ascending order.",
+            "show the {COLUMN_NAME,0} and the number of {TABLE_NAME,0} for each {COLUMN_NAME,0} in the ascending order.",
+            "show all {COLUMN_NAME,0} and corresponding number of {TABLE_NAME,0} in the ascending order of the numbers.",
+            "how many {TABLE_NAME,0} are there for each {COLUMN_NAME,0} ? list the smallest count first .",
+            "show all {COLUMN_NAME,0} and corresponding number of {TABLE_NAME,0} sorted by the count .",
+            "how many {TABLE_NAME,0} does each {COLUMN_NAME,0} have ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , COUNT ( * ) {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * )"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what are the {COLUMN_NAME,0} of all {TABLE_NAME,0} with {COLUMN_NAME,1} that is 10 ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} GROUP BY {COLUMN,1} HAVING COUNT ( * ) = 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "please list the {COLUMN_NAME,0} and {COLUMN_NAME,1} of {TABLE_NAME,0} in descending order of {COLUMN_NAME,2} .",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of each {TABLE_NAME,0} , listed in descending order by {COLUMN_NAME,2} ?",
+            "list the {COLUMN_NAME,0} and {COLUMN_NAME,1} of all {TABLE_NAME,0} sorted by {COLUMN_NAME,2} in descending order .",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of all {TABLE_NAME,0} sorted by decreasing {COLUMN_NAME,2} ?",
+            "sort the list of {COLUMN_NAME,0} and {COLUMN_NAME,1} of all {TABLE_NAME,0} in the descending order of {COLUMN_NAME,2} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} ORDER BY {COLUMN,2} DESC"
+    },
+    {
+        "Column Attributes": {"0": ["NUM"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "return the smallest {COLUMN_NAME,0} for every {COLUMN_NAME,1} .",
+            "what is the minimum {COLUMN_NAME,0} in each {COLUMN_NAME,1} ?"
+        ],
+        "SQL Pattern": "SELECT MIN ( {COLUMN,0} ) , {COLUMN,1} {FROM,0,1} GROUP BY {COLUMN,1}"
+    },
+    {
+        "Column Attributes": {"0": ["NUM"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "select the average {COLUMN_NAME,0} of each {TABLE_NAME,0} 's {COLUMN_NAME,1} .",
+            "what are the average {COLUMN_NAME,0} of {TABLE_NAME,0} , grouped by {COLUMN_NAME,1} ?",
+            "what are the average {COLUMN_NAME,0} of {TABLE_NAME,0} for different {COLUMN_NAME,1} ?"
+        ],
+        "SQL Pattern": "SELECT AVG ( {COLUMN,0} ) , {COLUMN,1} {FROM,0,1} GROUP BY {COLUMN,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} with least number of {COLUMN_NAME,0} ?",
+            "return the {COLUMN_NAME,0} of the {TABLE_NAME,0} that has the fewest corresponding {COLUMN_NAME,0} .",
+            "please show the different {COLUMN_NAME,0} , ordered by the number of {TABLE_NAME,0} that have each .",
+            "return the different {COLUMN_NAME,0} of {TABLE_NAME,0} , in ascending order of frequency .",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} , sorted by their frequency?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * ) ASC LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "list the {COLUMN_NAME,0} which average {COLUMN_NAME,1} is above 10 .",
+            "which {COLUMN_NAME,0} have an average {COLUMN_NAME,1} over 10 ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} GROUP BY {COLUMN,0} HAVING AVG ( {COLUMN,1} ) >= 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} with maximum {COLUMN_NAME,2} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} = ( SELECT MAX ( {COLUMN,2} ) {FROM, 3} )"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show all information on the {TABLE_NAME,0} that has the largest number of {COLUMN_NAME,0}.",
+            "what is all the information on the {TABLE_NAME,0} with the largest number of {COLUMN_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT * {FROM,0} ORDER BY {COLUMN,0} DESC LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "how many {TABLE_NAME,0} are there that have more than {VALUE},0 {COLUMN_NAME,0} ?",
+            "find the number of {TABLE_NAME,0} that have more than 10 {COLUMN_NAME,0} .",
+            "what is the count of {TABLE_NAME,0} with more than 10 {COLUMN_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT COUNT ( * ) {FROM,0} GROUP BY {COLUMN,0} HAVING COUNT ( * ) > 10 "
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "find the distinct {COLUMN_NAME,0} of {TABLE_NAME,0} having {COLUMN_NAME,1} between 10 and {VALUE,1} .",
+            "what are the distinct {COLUMN_NAME,0} with {COLUMN_NAME,1} between 10 and {VALUE,1} ?"
+        ],
+        "SQL Pattern": "SELECT DISTINCT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} BETWEEN 10 AND {VALUE,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "how many {TABLE_NAME,0} are there in {COLUMN_NAME,0} 10 or {VALUE,1} ?",
+            "count the number of {TABLE_NAME,0} in {COLUMN_NAME,0} 10 or {VALUE,1} ."
+        ],
+        "SQL Pattern": "SELECT COUNT ( * ) {FROM,0} WHERE {COLUMN,0} = 10 OR {COLUMN,0} = {VALUE,1}"
+    },
+    {
+        "Column Attributes": {"0": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what are the maximum and minimum {COLUMN_NAME,0} across all {TABLE_NAME,0} ?",
+            "return the maximum and minimum {COLUMN_NAME,0} across all {TABLE_NAME,0} .",
+            "what is the maximum and mininum {COLUMN_NAME,0} {COLUMN} for all {TABLE_NAME,0} ?",
+            "give the maximum and minimum {COLUMN_NAME,0} of all {TABLE_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT MAX ( {COLUMN,0} ) , MIN ( {COLUMN,0} ) {FROM,0}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "which {COLUMN_NAME,0} has both {TABLE_NAME,0} with less than 10 {COLUMN_NAME,1} and {TABLE_NAME,0} with more than {VALUE,1} {COLUMN_NAME,1} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} < 10 INTERSECT SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} > {VALUE,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "return the {COLUMN_NAME,0} of the largest {COLUMN_NAME,1}.",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the largest {COLUMN_NAME,1} .",
+            "what is the {COLUMN_NAME,0} of highest {COLUMN_NAME,1} ?",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the highest {COLUMN_NAME,1} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} ORDER BY {COLUMN,1} DESC LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} who have both 10 and {VALUE,1} {COLUMN_NAME,1} .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} who have {COLUMN_NAME,1} of both 10 and {VALUE,1} .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} which have both 10 and {VALUE,1} as {COLUMN_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = 10 INTERSECT SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = {VALUE,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "how many {TABLE_NAME,0} have {COLUMN_NAME,0} that contains 10 ?",
+            "count the number of {TABLE_NAME,0} that have an {COLUMN_NAME,0} containing 10 .",
+            "how many {TABLE_NAME,0} have {COLUMN_NAME,0} that contain the word 10 ?",
+            "find the number of {TABLE_NAME,0} whose {COLUMN_NAME,0} contain the word 10 .",
+            "how many {TABLE_NAME,0} ' {COLUMN_NAME,0} have the word 10 in them ?"
+        ],
+        "SQL Pattern": "SELECT COUNT ( * ) {FROM,0} WHERE {COLUMN,0} LIKE 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show the {COLUMN_NAME,0} and {COLUMN_NAME,1} with at least 10 {COLUMN_NAME,2} .",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of {TABLE_NAME,0} with 10 or more {COLUMN_NAME,2} ?",
+            "find the {COLUMN_NAME,0} and {COLUMN_NAME,1}  of the {TABLE_NAME,0} with at least 10 {COLUMN_NAME,2} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} GROUP BY {COLUMN,2} HAVING COUNT ( * ) >= 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"],"2": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "find the distinct {COLUMN_NAME,0} of all {TABLE_NAME,0} that have a higher {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME_2} .",
+            "find the distinct COLUMN_NAME,0} of all {TABLE_NAME,0} that have {COLUMN_NAME,1} higher than some {TABLE_NAME,0} from 10 {COLUMN_NAME_2} .",
+            "what are the distinct COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} higher than any {TABLE_NAME,0} from 10 {COLUMN_NAME_2} .",
+            "what are the distinct COLUMN_NAME,0} of every {TABLE_NAME,0} that has a greater {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME_2} ?"
+        ],
+        "SQL Pattern": "SELECT DISTINCT {COLUMN,0} {FROM,0,1,2} WHERE {COLUMN,1} > ( SELECT MIN ( {COLUMN,0} ) {FROM,0,1,2} WHERE {COLUMN,2} = 10 )"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what are all the {COLUMN_NAME,0} and {COLUMN_NAME,1}?",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} ?",
+            "show {COLUMN_NAME,0} and {COLUMN_NAME,1} of {TABLE_NAME,0}  .",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of each {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "please show the {COLUMN_NAME,0} of the {TABLE_NAME,0} that have at least 10 records .",
+            "what are the {COLUMN_NAME,0} of all {TABLE_NAME,0} that have 10 or more {TABLE_NAME,0} ?",
+            "show the {COLUMN_NAME,0} of {TABLE_NAME,0} who have at least 10 {TABLE_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} HAVING COUNT ( * ) >= 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show {COLUMN_NAME,0} for all {TABLE_NAME,0} whose {COLUMN_NAME,1} are greater than the average .",
+            "what are the {COLUMN_NAME,0} for {TABLE_NAME,0} that have an {COLUMN_NAME,1} greater than the average .",
+            "find the {COLUMN_NAME,0} for all {TABLE_NAME,0} who have more than the average {COLUMN_NAME,1} .",
+            "what are the {COLUMN_NAME,0} for {TABLE_NAME,0} who have more than the average {COLUMN_NAME,1}?",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} greater than the average of all {TABLE_NAME,0} ?",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} is higher than the average {COLUMN_NAME,1} .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} is more than the average {COLUMN_NAME,1} of {TABLE_NAME,0} .",
+            "list all {COLUMN_NAME,0} which have {COLUMN_NAME,1} higher than the average .",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} above the average {COLUMN_NAME,1} across all {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} > ( SELECT AVG ( {COLUMN,1} ) {FROM,0,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "which {COLUMN_NAME,0} has the least {COLUMN_NAME,1} ?",
+            "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the smallest {COLUMN_NAME,1} ?",
+            "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the minimum {COLUMN_NAME,1} ?",
+            "return the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the fewest {COLUMN_NAME,1} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} ORDER BY {COLUMN,1} ASC LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "list {COLUMN_NAME,0} of {TABLE_NAME,0} that have the number of {TABLE_NAME,0} greater than 10 .",
+            "list the {COLUMN_NAME,0} of {{TABLE_NAME,0} which has number of {TABLE_NAME,0} greater than 10 .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} who have more than 10 {TABLE_NAME,0} .",
+            "show the {COLUMN_NAME,0} shared by more than 10 {TABLE_NAME,0} .",
+            "what are the {COLUMN_NAME,0} more than 10 {TABLE_NAME,0} have ?",
+            "please show the {COLUMN_NAME,0} of the {TABLE_NAME,0} with count more than 10 ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} HAVING COUNT ( * ) > 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show the {COLUMN_NAME,0} of the {TABLE_NAME,0} that has the greatest number of {TABLE_NAME,0} .",
+            "show the {COLUMN_NAME,0} of the {TABLE_NAME,0} that has the most {TABLE_NAME,0} .",
+            "what is the {COLUMN_NAME,0} of the most common {TABLE_NAME,0} in all {COLUMN_NAME,0} ?",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} that is most frequent across all {COLUMN_NAME,0} .",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} who has the largest number of {TABLE_NAME,0} .",
+            "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} who has the highest number of {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * ) DESC LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} which are {COLUMN_NAME,1} 10 but not {COLUMN_NAME,1} {VALUE,1} .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} which are in 10 {COLUMN_NAME,1} but not in {VALUE,1} {COLUMN_NAME,1} .",
+            "find the {COLUMN_NAME,0} of {TABLE_NAME,0} which have 10 but no {VALUE,1} as {COLUMN_NAME,1} .",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} which have {COLUMN_NAME,1} 10 but not {VALUE,1} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = 10 EXCEPT SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = {VALUE,1}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what are the {COLUMN_NAME,0} of the {TABLE_NAME,0} that have exactly 10 {TABLE_NAME,0} ?",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} that have just 10 {TABLE_NAME,0} .",
+            "find the {COLUMN_NAME,0} that have 10 {TABLE_NAME,0} .",
+            "find the {COLUMN_NAME,0} who has exactly 10 {TABLE_NAME,0} .",
+            "find the {COLUMN_NAME,0} which have exactly 10 {TABLE_NAME,0} .",
+            "what are the {COLUMN_NAME,0} with exactly 10 {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} HAVING COUNT ( * ) = 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show the {COLUMN_NAME,0} and the total {COLUMN_NAME,1} of {TABLE_NAME,0} .",
+            "what are total {COLUMN_NAME,1} for each {COLUMN_NAME,0} ?",
+            "show all {COLUMN_NAME,0} and the total {COLUMN_NAME,1} for each .",
+            "what are the {COLUMN_NAME,0} for all {TABLE_NAME,0} , and what is the total {{COLUMN_NAME,1} for each ?",
+            "show the {COLUMN_NAME,0} and their total {COLUMN_NAME,1} of {TABLE_NAME,0} .",
+            "what are the {{COLUMN_NAME,0} of all the {TABLE_NAME,0} , and the total {COLUMN_NAME,1} by each ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , SUM ( {COLUMN,1} ) {FROM,0,1} GROUP BY {COLUMN,0}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} is not 10 ?",
+            "return the {COLUMN_NAME,0} of {TABLE_NAME,0} for which the {COLUMN_NAME,1} is not 10 ?",
+            "show the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} are not 10.",
+            "list the {COLUMN_NAME,0} of the {TABLE_NAME,0} whose {COLUMN_NAME,1} is not 10 .",
+            "what are the {COLUMN_NAME,0} of the {TABLE_NAME,0} with {COLUMN_NAME,0} other than 10 ?",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} are not 10 ?",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} are not 10 ?",
+            "return the {COLUMN_NAME,0} of {TABLE_NAME,0} that do not have the {COLUMN_NAME,1} 10 ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} ! = 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "show the {COLUMN_NAME,0} and the number of unique {COLUMN_NAME,1} containing each {COLUMN_NAME,0} .",
+            "how many distinct {COLUMN_NAME,1} correspond to each {COLUMN_NAME,0} ?",
+            "show {COLUMN_NAME,0} and the number of distinct {COLUMN_NAME,1} in each {COLUMN_NAME,0} .",
+            "how many different {COLUMN_NAME,1} correspond to each {COLUMN_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , COUNT ( DISTINCT {COLUMN,1} ) {FROM,0,1} GROUP BY {COLUMN,0}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"],"3": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "list {COLUMN_NAME,0} and {COLUMN_NAME,1} who have {COLUMN_NAME,2} greater than 5 or {COLUMN_NAME,3} shorter than 10 .",
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {COLUMN} who have {COLUMN_NAME,2} above five or {COLUMN_NAME,3} below ten ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2,3} WHERE {COLUMN,2} > 5 OR {COLUMN,3} < 10"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "find all {COLUMN_NAME,0} that have fewer than three in {TABLE_NAME,0} .",
+            "which {COLUMN_NAME,0} have less than 3 in {TABLE_NAME,0} ?",
+            "show the {COLUMN_NAME,0} with fewer than 3 {TABLE_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} HAVING COUNT ( * ) < 3"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} for the {TABLE_NAME,0} with the rank 5 smallest {COLUMN_NAME,2} ?",
+            "return the {COLUMN_NAME,0} and {COLUMN_NAME,1} of {TABLE_NAME,0} with the five lowest {COLUMN_NAME,2} .",
+            "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} with the top 5 smallest {COLUMN_NAME,2} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} ORDER BY {COLUMN,2} LIMIT 5"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"]},
+        "Column Identity": {"3": "2"},
+        "Question Patterns": [
+            "find the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} whose {COLUMN_NAME,2} is lower than the average {COLUMN_NAME,2} of all {TABLE_NAME,0} .",
+            "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} of every {TABLE_NAME,0} that has a {COLUMN_NAME,2} lower than average ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} < ( SELECT AVG ( {COLUMN,3} ) {FROM, 3} )"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {"2": "1"},
+        "Question Patterns": [
+            "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the largest {COLUMN_NAME,1} ?",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the highest {COLUMN_NAME,1}.",
+            "what is the {COLUMN_NAME,0} of {TABLE_NAME,0} with the maximum {COLUMN_NAME,1} across all {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = ( SELECT MAX ( {COLUMN,2} ) {FROM,0,1} )"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "what is the {COLUMN,0} of {TABLE_NAME,0} that has fewest number of {TABLE_NAME,0} ?",
+            "which {COLUMN,0} has the smallest amount of {TABLE_NAME,0}?",
+            "which {COLUMN,0} has the fewest {TABLE_NAME,0} ?",
+            "which {COLUMN,0} has least number of {TABLE_NAME,0} ?",
+            "give the {COLUMN,0} with the fewest {TABLE_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * ) LIMIT 1"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["TXT"]},
+        "Column Identity": {},
+        "Question Patterns": [
+            "list the {COLUMN_NAME,0} , {COLUMN_NAME,1} and the {COLUMN_NAME,2} of the {TABLE_NAME,0} .",
+            "what are the {COLUMN_NAME,0} , {COLUMN_NAME,1} , and {COLUMN_NAME,0} of each {TABLE_NAME,0} ?",
+            "display the {COLUMN_NAME,0} , {COLUMN_NAME,1} , and {COLUMN_NAME,2} for each {TABLE_NAME,0} .",
+            "what are the {COLUMN_NAME,0} , {COLUMN_NAME,1} , and {COLUMN_NAME,2} for each {TABLE_NAME,0} ?",
+            "show the {COLUMN_NAME,0} , {COLUMN_NAME,1} , and {COLUMN_NAME,2} of all the {TABLE_NAME,0} .",
+            "what are the {COLUMN_NAME,0} , {COLUMN_NAME,1} , and {COLUMN_NAME,2} of each {TABLE_NAME,0} ?"
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} , {COLUMN,2} {FROM,0,1,2}"
+    },
+    {
+        "Column Attributes": {},
+        "Column Identity": {},
+        "Question Patterns": [
+            "list all information about {TABLE_NAME,0} .",
+            "Show everything on {TABLE_NAME,0}",
+            "Return all columns in {TABLE_NAME,0} ."
+        ],
+        "SQL Pattern": "SELECT * {FROM, 0}"
+    },
+    {
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Identity": {"2": "1"},
+        "Question Patterns": [
+            "list all {COLUMN_NAME,0} which have highest {COLUMN_NAME,1} .",
+            "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} that have a {COLUMN_NAME,1} equal to the highest {COLUMN_NAME,1} across all {TABLE_NAME,0} ?",
+            "retrieve the {COLUMN_NAME,0} of the {TABLE_NAME,0} that has the largest number of {COLUMN_NAME,1} ."
+        ],
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUM,1} = ( SELECT MAX ( {COLUMN,2} ) {FROM,2} )"
+    }
+]
