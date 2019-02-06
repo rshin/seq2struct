@@ -102,7 +102,7 @@
         "Question Patterns": [
             "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} with maximum {COLUMN_NAME,2} ?"
         ],
-        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} = ( SELECT MAX ( {COLUMN,2} ) {FROM, 3} )"
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} = ( SELECT MAX ( {COLUMN,2} ) {FROM,3} )"
     },
     {
         "Column Attributes": {"0": ["TXT"]},
@@ -117,7 +117,7 @@
         "Column Attributes": {"0": ["TXT"]},
         "Column Identity": {},
         "Question Patterns": [
-            "how many {TABLE_NAME,0} are there that have more than {VALUE},0 {COLUMN_NAME,0} ?",
+            "how many {TABLE_NAME,0} are there that have more than 10 {COLUMN_NAME,0} ?",
             "find the number of {TABLE_NAME,0} that have more than 10 {COLUMN_NAME,0} .",
             "what is the count of {TABLE_NAME,0} with more than 10 {COLUMN_NAME,0} ?"
         ],
@@ -147,7 +147,7 @@
         "Question Patterns": [
             "what are the maximum and minimum {COLUMN_NAME,0} across all {TABLE_NAME,0} ?",
             "return the maximum and minimum {COLUMN_NAME,0} across all {TABLE_NAME,0} .",
-            "what is the maximum and mininum {COLUMN_NAME,0} {COLUMN} for all {TABLE_NAME,0} ?",
+            "what is the maximum and mininum {COLUMN_NAME,0} {TABLE_NAME,0} for all {TABLE_NAME,0} ?",
             "give the maximum and minimum {COLUMN_NAME,0} of all {TABLE_NAME,0} ."
         ],
         "SQL Pattern": "SELECT MAX ( {COLUMN,0} ) , MIN ( {COLUMN,0} ) {FROM,0}"
@@ -207,10 +207,10 @@
         "Column Attributes": {"0": ["TXT"],"1": ["NUM"],"2": ["TXT"]},
         "Column Identity": {},
         "Question Patterns": [
-            "find the distinct {COLUMN_NAME,0} of all {TABLE_NAME,0} that have a higher {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME_2} .",
-            "find the distinct COLUMN_NAME,0} of all {TABLE_NAME,0} that have {COLUMN_NAME,1} higher than some {TABLE_NAME,0} from 10 {COLUMN_NAME_2} .",
-            "what are the distinct COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} higher than any {TABLE_NAME,0} from 10 {COLUMN_NAME_2} .",
-            "what are the distinct COLUMN_NAME,0} of every {TABLE_NAME,0} that has a greater {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME_2} ?"
+            "find the distinct {COLUMN_NAME,0} of all {TABLE_NAME,0} that have a higher {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME,2} .",
+            "find the distinct {COLUMN_NAME,0} of all {TABLE_NAME,0} that have {COLUMN_NAME,1} higher than some {TABLE_NAME,0} from 10 {COLUMN_NAME,2} .",
+            "what are the distinct COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} higher than any {TABLE_NAME,0} from 10 {COLUMN_NAME,2} .",
+            "what are the distinct COLUMN_NAME,0} of every {TABLE_NAME,0} that has a greater {COLUMN_NAME,1} than some {TABLE_NAME,0} with 10 {COLUMN_NAME,2} ?"
         ],
         "SQL Pattern": "SELECT DISTINCT {COLUMN,0} {FROM,0,1,2} WHERE {COLUMN,1} > ( SELECT MIN ( {COLUMN,0} ) {FROM,0,1,2} WHERE {COLUMN,2} = 10 )"
     },
@@ -218,7 +218,7 @@
         "Column Attributes": {"0": ["TXT"],"1": ["TXT"]},
         "Column Identity": {},
         "Question Patterns": [
-            "what are all the {COLUMN_NAME,0} and {COLUMN_NAME,1}?",
+            "what are all the {COLUMN_NAME,0} and {COLUMN_NAME,1} ?",
             "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} ?",
             "show {COLUMN_NAME,0} and {COLUMN_NAME,1} of {TABLE_NAME,0}  .",
             "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of each {TABLE_NAME,0} ?"
@@ -242,14 +242,14 @@
             "show {COLUMN_NAME,0} for all {TABLE_NAME,0} whose {COLUMN_NAME,1} are greater than the average .",
             "what are the {COLUMN_NAME,0} for {TABLE_NAME,0} that have an {COLUMN_NAME,1} greater than the average .",
             "find the {COLUMN_NAME,0} for all {TABLE_NAME,0} who have more than the average {COLUMN_NAME,1} .",
-            "what are the {COLUMN_NAME,0} for {TABLE_NAME,0} who have more than the average {COLUMN_NAME,1}?",
+            "what are the {COLUMN_NAME,0} for {TABLE_NAME,0} who have more than the average {COLUMN_NAME,1} ?",
             "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} greater than the average of all {TABLE_NAME,0} ?",
             "find the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} is higher than the average {COLUMN_NAME,1} .",
             "find the {COLUMN_NAME,0} of {TABLE_NAME,0} whose {COLUMN_NAME,1} is more than the average {COLUMN_NAME,1} of {TABLE_NAME,0} .",
             "list all {COLUMN_NAME,0} which have {COLUMN_NAME,1} higher than the average .",
             "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} with {COLUMN_NAME,1} above the average {COLUMN_NAME,1} across all {TABLE_NAME,0} ?"
         ],
-        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} > ( SELECT AVG ( {COLUMN,1} ) {FROM,0,1}"
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} > ( SELECT AVG ( {COLUMN,1} ) {FROM,0,1} )"
     },
     {
         "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
@@ -267,7 +267,7 @@
         "Column Identity": {},
         "Question Patterns": [
             "list {COLUMN_NAME,0} of {TABLE_NAME,0} that have the number of {TABLE_NAME,0} greater than 10 .",
-            "list the {COLUMN_NAME,0} of {{TABLE_NAME,0} which has number of {TABLE_NAME,0} greater than 10 .",
+            "list the {COLUMN_NAME,0} of {TABLE_NAME,0} which has number of {TABLE_NAME,0} greater than 10 .",
             "find the {COLUMN_NAME,0} of {TABLE_NAME,0} who have more than 10 {TABLE_NAME,0} .",
             "show the {COLUMN_NAME,0} shared by more than 10 {TABLE_NAME,0} .",
             "what are the {COLUMN_NAME,0} more than 10 {TABLE_NAME,0} have ?",
@@ -319,9 +319,9 @@
             "show the {COLUMN_NAME,0} and the total {COLUMN_NAME,1} of {TABLE_NAME,0} .",
             "what are total {COLUMN_NAME,1} for each {COLUMN_NAME,0} ?",
             "show all {COLUMN_NAME,0} and the total {COLUMN_NAME,1} for each .",
-            "what are the {COLUMN_NAME,0} for all {TABLE_NAME,0} , and what is the total {{COLUMN_NAME,1} for each ?",
+            "what are the {COLUMN_NAME,0} for all {TABLE_NAME,0} , and what is the total {COLUMN_NAME,1} for each ?",
             "show the {COLUMN_NAME,0} and their total {COLUMN_NAME,1} of {TABLE_NAME,0} .",
-            "what are the {{COLUMN_NAME,0} of all the {TABLE_NAME,0} , and the total {COLUMN_NAME,1} by each ?"
+            "what are the {COLUMN_NAME,0} of all the {TABLE_NAME,0} , and the total {COLUMN_NAME,1} by each ?"
         ],
         "SQL Pattern": "SELECT {COLUMN,0} , SUM ( {COLUMN,1} ) {FROM,0,1} GROUP BY {COLUMN,0}"
     },
@@ -356,7 +356,7 @@
         "Column Identity": {},
         "Question Patterns": [
             "list {COLUMN_NAME,0} and {COLUMN_NAME,1} who have {COLUMN_NAME,2} greater than 5 or {COLUMN_NAME,3} shorter than 10 .",
-            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {COLUMN} who have {COLUMN_NAME,2} above five or {COLUMN_NAME,3} below ten ?"
+            "what are the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} who have {COLUMN_NAME,2} above five or {COLUMN_NAME,3} below ten ?"
         ],
         "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2,3} WHERE {COLUMN,2} > 5 OR {COLUMN,3} < 10"
     },
@@ -381,20 +381,20 @@
         "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} ORDER BY {COLUMN,2} LIMIT 5"
     },
     {
-        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"]},
+        "Column Attributes": {"0": ["TXT"],"1": ["TXT"],"2": ["NUM"], "3": ["NUM"]},
         "Column Identity": {"3": "2"},
         "Question Patterns": [
             "find the {COLUMN_NAME,0} and {COLUMN_NAME,1} of the {TABLE_NAME,0} whose {COLUMN_NAME,2} is lower than the average {COLUMN_NAME,2} of all {TABLE_NAME,0} .",
             "what is the {COLUMN_NAME,0} and {COLUMN_NAME,1} of every {TABLE_NAME,0} that has a {COLUMN_NAME,2} lower than average ?"
         ],
-        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} < ( SELECT AVG ( {COLUMN,3} ) {FROM, 3} )"
+        "SQL Pattern": "SELECT {COLUMN,0} , {COLUMN,1} {FROM,0,1,2} WHERE {COLUMN,2} < ( SELECT AVG ( {COLUMN,3} ) {FROM,3} )"
     },
     {
-        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"], "2": ["NUM"]},
         "Column Identity": {"2": "1"},
         "Question Patterns": [
             "what is the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the largest {COLUMN_NAME,1} ?",
-            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the highest {COLUMN_NAME,1}.",
+            "find the {COLUMN_NAME,0} of the {TABLE_NAME,0} with the highest {COLUMN_NAME,1} .",
             "what is the {COLUMN_NAME,0} of {TABLE_NAME,0} with the maximum {COLUMN_NAME,1} across all {TABLE_NAME,0} ?"
         ],
         "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = ( SELECT MAX ( {COLUMN,2} ) {FROM,0,1} )"
@@ -403,11 +403,11 @@
         "Column Attributes": {"0": ["TXT"]},
         "Column Identity": {},
         "Question Patterns": [
-            "what is the {COLUMN,0} of {TABLE_NAME,0} that has fewest number of {TABLE_NAME,0} ?",
-            "which {COLUMN,0} has the smallest amount of {TABLE_NAME,0}?",
-            "which {COLUMN,0} has the fewest {TABLE_NAME,0} ?",
-            "which {COLUMN,0} has least number of {TABLE_NAME,0} ?",
-            "give the {COLUMN,0} with the fewest {TABLE_NAME,0} ."
+            "what is the {COLUMN_NAME,0} of {TABLE_NAME,0} that has fewest number of {TABLE_NAME,0} ?",
+            "which {COLUMN_NAME,0} has the smallest amount of {TABLE_NAME,0}?",
+            "which {COLUMN_NAME,0} has the fewest {TABLE_NAME,0} ?",
+            "which {COLUMN_NAME,0} has least number of {TABLE_NAME,0} ?",
+            "give the {COLUMN_NAME,0} with the fewest {TABLE_NAME,0} ."
         ],
         "SQL Pattern": "SELECT {COLUMN,0} {FROM,0} GROUP BY {COLUMN,0} ORDER BY COUNT ( * ) LIMIT 1"
     },
@@ -435,13 +435,13 @@
         "SQL Pattern": "SELECT * {FROM, 0}"
     },
     {
-        "Column Attributes": {"0": ["TXT"],"1": ["NUM"]},
+        "Column Attributes": {"0": ["TXT"],"1": ["NUM"], "2": ["NUM"]},
         "Column Identity": {"2": "1"},
         "Question Patterns": [
             "list all {COLUMN_NAME,0} which have highest {COLUMN_NAME,1} .",
             "what are the {COLUMN_NAME,0} of {TABLE_NAME,0} that have a {COLUMN_NAME,1} equal to the highest {COLUMN_NAME,1} across all {TABLE_NAME,0} ?",
             "retrieve the {COLUMN_NAME,0} of the {TABLE_NAME,0} that has the largest number of {COLUMN_NAME,1} ."
         ],
-        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUM,1} = ( SELECT MAX ( {COLUMN,2} ) {FROM,2} )"
+        "SQL Pattern": "SELECT {COLUMN,0} {FROM,0,1} WHERE {COLUMN,1} = ( SELECT MAX ( {COLUMN,2} ) {FROM,2} )"
     }
 ]

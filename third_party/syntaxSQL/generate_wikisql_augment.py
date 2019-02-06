@@ -1,16 +1,23 @@
+import argparse
+from collections import defaultdict
 import json
+import os
 import random
 import re
+import sys
 import traceback
-import os
+
 import numpy as np
-from collections import defaultdict
+import nltk
+import tqdm
+
+from third_party.spider import process_sql
+from third_party.spider.preprocess import schema as schema_mod
 
 agg_ops = ['', 'MAX', 'MIN', 'COUNT', 'SUM', 'AVG']
 cond_ops = ['=', '>', '<', 'OP']
 
-random.seed(0)
-
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 class Column:
     ATTRIBUTE_TXT = "TXT"
@@ -409,17 +416,20 @@ def load_database_schema(path):
     return schema
 
 
-def load_patterns(path, schema):
-    data = json.load(open(path, "r"))
+#def load_patterns(path, schema):
+#    data = json.load(open(path, "r"))
+def load_patterns(data, schema):
     patterns = []
     for pattern_data in data:
         patterns.append(Pattern(schema, pattern_data))
 
     return patterns
 
-def generate_every_db(db):
+def generate_every_db(db, schemas, tables, patterns_data):
     db_name = db["db_id"]
     col_types = db["column_types"]
+    process_sql_schema = schema_mod.Schema(schemas[db_name], tables[db_name])
+
     if "number" in col_types:
         try:
             schema = Schema(db)
@@ -427,25 +437,34 @@ def generate_every_db(db):
             traceback.print_exc()
             print("skip db {}".format(db_name))
             return
-        f = open("data_augment/{}.txt".format(db_name),"w")
 
-
-        idx = 0
-        patterns = load_patterns("data_augment/train_patterns.json", schema)
-
-        while idx < 10:
+        patterns = load_patterns(patterns_data, schema)
+        questions_and_queries = []
+        while len(questions_and_queries) < 10:
             pattern = random.choice(patterns)
             try:
                 sql, questions = pattern.populate()
                 #for q in questions:
                 if len(questions) != 0:
-                    f.write("{}. {}\n".format(1,random.choice(questions).encode("utf8")))
-                    f.write("P:\n\n")
-                    f.write("{}\n\n".format(sql.encode("utf8")))
-                idx += 1
+                    question = random.choice(questions)
+                    questions_and_queries.append((question, sql))
             except:
                 pass
-        f.close()
+
+        return [
+            {
+                "db_id": db_name,
+                "query": query,
+                "query_toks": process_sql.tokenize(query),
+                "query_toks_no_value": None,
+                "question": question,
+                "question_toks": nltk.word_tokenize(question),
+                "sql": process_sql.get_sql(process_sql_schema, query),
+            }
+            for question, query in questions_and_queries
+        ]
+    else:
+        return []
 
     # for pattern in patterns:
     #     try:
@@ -461,10 +480,21 @@ def generate_every_db(db):
     #     idx += 1
 
 if __name__ == "__main__":
-    dbs = json.load(open("data_augment/wikisql_tables.json"))
-    count = 0
-    for db in dbs[:]:
-        if count % 1000 == 0:
-            print("processed {} files...".format(float(count)/len(dbs)))
-        generate_every_db(db)
-        count += 1
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--tables', default=os.path.join(SCRIPT_DIR, "data_augment/wikisql_tables.json"))
+    parser.add_argument('--patterns', default=os.path.join(SCRIPT_DIR, "data_augment/train_patterns.json"))
+    parser.add_argument('--output', required=True)
+    args = parser.parse_args()
+
+    random.seed(0)
+    dbs = json.load(open(args.tables))
+    patterns_data = json.load(open(args.patterns))
+
+    schemas, db_names, tables = schema_mod.get_schemas_from_json(args.tables)
+
+    examples = []
+    for db in tqdm.tqdm(dbs[:]):
+        examples += generate_every_db(db, schemas, tables, patterns_data)
+    print('{} examples generated.'.format(len(examples)))
+    with open(args.output, 'w') as f:
+        json.dump(examples, f, sort_keys=True)
