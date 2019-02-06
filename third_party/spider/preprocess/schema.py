@@ -1,3 +1,6 @@
+import json
+
+
 class Schema:
     """
     Simple schema which maps table&column to a unique identifier
@@ -33,3 +36,24 @@ class Schema:
             idMap[key] = i
 
         return idMap
+
+def get_schemas_from_json(fpath):
+    with open(fpath) as f:
+        data = json.load(f)
+    db_names = [db['db_id'] for db in data]
+
+    tables = {}
+    schemas = {}
+    for db in data:
+        db_id = db['db_id']
+        schema = {} #{'table': [col.lower, ..., ]} * -> __all__
+        column_names_original = db['column_names_original']
+        table_names_original = db['table_names_original']
+        tables[db_id] = {'column_names_original': column_names_original, 'table_names_original': table_names_original}
+        for i, tabn in enumerate(table_names_original):
+            table = str(tabn.lower())
+            cols = [str(col.lower()) for td, col in column_names_original if td == i]
+            schema[table] = cols
+        schemas[db_id] = schema
+
+    return schemas, db_names, tables
