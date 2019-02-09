@@ -33,8 +33,8 @@ def main():
         orig_parsed = base_grammar.parse(item.orig['orig'], 'train')
 
         canonicalized_orig_code = base_grammar.unparse(
-            base_grammar.parse(item.orig['orig'], 'train'))
-        unparsed = grammar.unparse(parsed)
+            base_grammar.parse(item.orig['orig'], 'train'), item)
+        unparsed = grammar.unparse(parsed, item)
         if canonicalized_orig_code != unparsed:
             print('Original tree:')
             pprint.pprint(orig_parsed)

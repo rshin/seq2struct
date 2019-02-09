@@ -6,6 +6,7 @@ import json
 import re
 
 import asdl
+import attr
 
 from seq2struct import ast_util
 from seq2struct.utils import registry
@@ -20,8 +21,16 @@ class MissingValue:
     pass
 
 
+@attr.s
+class SeqField:
+    type_name = attr.ib()
+    field = attr.ib()
+
+
 @registry.register('grammar', 'idiom_ast')
 class IdiomAstGrammar:
+
+    pointers = {}
 
     def __init__(self, base_grammar, template_file, root_type=None):
         self.base_grammar = registry.construct('grammar', base_grammar)
@@ -38,6 +47,12 @@ class IdiomAstGrammar:
         singular_types_with_single_seq_field = set(
             name for name, type_info in self.ast_wrapper.singular_types.items()
             if len(type_info.fields) == 1 and type_info.fields[0].seq)
+        seq_fields = {
+            '{}-{}'.format(name, field.name): SeqField(name, field)
+            for name, type_info in self.ast_wrapper.singular_types.items()
+            for field in type_info.fields
+            if field.seq
+        }
 
         templates_by_head_type = collections.defaultdict(list)
         for template in self.templates:
@@ -52,28 +67,31 @@ class IdiomAstGrammar:
             # which can occur in any seq field of the corresponding sum/product type.
             # However, the NL2Code model has no such notion currently.
             if head_type in singular_types_with_single_seq_field:
-                # seq_type could be sum type or product type, but not constructor
-                seq_type = self.ast_wrapper.singular_types[head_type].fields[0].type
-                templates_by_head_type[seq_type].append((template, True))
-                templates_by_head_type[head_type].append((template, False))
+                # field.type could be sum type or product type, but not constructor
+                field = self.ast_wrapper.singular_types[head_type].fields[0]
+                templates_by_head_type[field.type].append((template, SeqField(head_type, field)))
+                templates_by_head_type[head_type].append((template, None))
+            elif head_type in seq_fields:
+                seq_field = seq_fields[head_type]
+                templates_by_head_type[seq_field.field.type].append((template, seq_field))
             else:
-                templates_by_head_type[head_type].append((template, False))
+                templates_by_head_type[head_type].append((template, None))
         
         types_to_replace = {}
 
         for head_type, templates in templates_by_head_type.items():
             constructors, seq_fragment_constructors = [], []
-            for template, is_seq_fragment in templates:
-                if is_seq_fragment:
+            for template, seq_field in templates:
+                if seq_field:
                     if head_type in self.ast_wrapper.product_types:
                         seq_type = '{}_plus_templates'.format(head_type)
                     else:
                         seq_type = head_type
 
                     seq_fragment_constructors.append(
-                        self._template_to_constructor(template, '_{}_seq'.format(seq_type)))
+                        self._template_to_constructor(template, '_{}_seq'.format(seq_type), seq_field))
                 else:
-                    constructors.append(self._template_to_constructor(template))
+                    constructors.append(self._template_to_constructor(template, '', seq_field))
 
             # head type can be:
             # constructor (member of sum type)
@@ -93,10 +111,6 @@ class IdiomAstGrammar:
 
             # product type
             elif head_type in self.ast_wrapper.product_types:
-                #assert constructors
-                #if seq_fragment_constructors:
-                #    raise NotImplementedError('seq fragments of product types not supported: {}'.format(head_type))
-
                 # Replace Product with Constructor
                 # - make a Constructor
                 orig_prod_type = self.ast_wrapper.product_types[head_type]
@@ -143,7 +157,7 @@ class IdiomAstGrammar:
     def unparse(self, tree, item):
         expanded_tree = self._expand_templates(tree)
         self.base_ast_wrapper.verify_ast(expanded_tree)
-        return self.base_grammar.unparse(expanded_tree)
+        return self.base_grammar.unparse(expanded_tree, item)
 
     def tokenize_field_value(self, field_value):
         return self.base_grammar.tokenize_field_value(field_value)
@@ -194,7 +208,7 @@ class IdiomAstGrammar:
             hole_values[hole_id] = expanded_value
         return template(hole_values)
     
-    def _template_to_constructor(self, template_dict, suffix=''):
+    def _template_to_constructor(self, template_dict, suffix, seq_field):
         hole_node_types = {}
 
         # Find where the holes occur
@@ -261,7 +275,7 @@ class IdiomAstGrammar:
             fields.append(field)
 
         constructor = asdl.Constructor('Template{}{}'.format(template_dict['id'], suffix), fields)
-        constructor.template = self.convert_idiom_ast(template_dict['idiom'], template_id=template_dict['id'])
+        constructor.template = self.convert_idiom_ast(template_dict['idiom'], template_id=template_dict['id'], seq_field=seq_field)
 
         return constructor
 
@@ -275,25 +289,41 @@ class IdiomAstGrammar:
             assert len(type_info.fields) == 1
             field_info = type_info.fields[0]
         return field_info
+    
+    @classmethod
+    def _node_type(cls, node):
+        if isinstance(node[0], dict):
+            if 'nt' in node[0]:
+                return node[0]['nt']
+            elif 'template_id' in node[0]:
+                return 'Template{}'.format(node[0]['template_id'])
+        else:
+            return node[0]
 
-    def convert_idiom_ast(self, idiom_ast, template_id=None, seq_fragment_type=None):
-        if template_id is not  None:
+    def convert_idiom_ast(self, idiom_ast, template_id=None, seq_fragment_type=None, seq_field=None):
+        if template_id is not None:
             node_type, ref_symbols, hole, children = idiom_ast
         else:
             node_type, ref_symbols, children = idiom_ast
 
+        is_template_node = False
+        extra_types = []
         if isinstance(node_type, dict):
-            assert 'template_id' in node_type
             if seq_fragment_type:
                 suffix = '_{}_seq'.format(seq_fragment_type)
             else:
                 suffix = '' 
-            node_type = 'Template{}{}'.format(node_type['template_id'], suffix)
-            is_template_node = True
-        else:
-            is_template_node = False
+            if 'template_id' in node_type:
+                node_type = 'Template{}{}'.format(node_type['template_id'], suffix)
+                is_template_node = True
+            elif 'nt' in node_type and 'mt' in node_type:
+                extra_types = ['Template{}{}'.format(i, suffix) for i in node_type['mt']]
+                node_type = node_type['nt']
 
-        type_info = self.ast_wrapper.singular_types[node_type]
+        if seq_field is None:
+            field_infos = self.ast_wrapper.singular_types[node_type].fields
+        else:
+            field_infos = [seq_field.field]
 
         # Each element of this list is a tuple (field, child)
         # - field: asdl.Field object
@@ -303,8 +333,8 @@ class IdiomAstGrammar:
         #   and with a single child that contains the content of the field
         children_to_convert = []
         if is_template_node:
-            assert len(children) == len(type_info.fields)
-            for field, child in zip(type_info.fields, children):
+            assert len(children) == len(field_infos)
+            for field, child in zip(field_infos, children):
                 if field.hole_type == HoleType.ReplaceSelf and  field.seq:
                     children_to_convert.append((field, child))
                 else:
@@ -316,17 +346,17 @@ class IdiomAstGrammar:
                # else:
                #     raise ValueError('Unexpected hole_type: {}'.format(field.hole_type))
         else:
-            fields_by_name = {f.name: f for f in type_info.fields}
-            if len(type_info.fields) == 0:
+            fields_by_name = {f.name: f for f in field_infos}
+            if len(field_infos) == 0:
                 pass
-            elif len(type_info.fields) == 1:
-                children_to_convert.append((type_info.fields[0], idiom_ast))
+            elif len(field_infos) == 1:
+                children_to_convert.append((field_infos[0], idiom_ast))
             else:
                 prefix_len = len(node_type) + 1
                 for child in children:
-                    field_name = child[0][prefix_len:]
+                    field_name = self._node_type(child)[prefix_len:]
                     children_to_convert.append((fields_by_name[field_name], child))
-        assert set(field.name for field, _ in children_to_convert) == set(field.name for field in type_info.fields)
+        assert set(field.name for field, _ in children_to_convert) == set(field.name for field in field_infos)
 
         def result_creator(hole_values={}):
             if template_id is not None and hole is not None and self.templates[template_id]['holes'][hole]['type'] == 'ReplaceSelf':
@@ -342,7 +372,7 @@ class IdiomAstGrammar:
                 #   - 1: for regular fields, opt fields, seq fields if length is 0 or represented by a template node
                 #   - 2: for seq fields of length >= 1
                 if field.type in self.ast_wrapper.primitive_types:
-                    convert = lambda node: (lambda hole_values: self.convert_builtin_type(field.type, node[0]))
+                    convert = lambda node: (lambda hole_values: self.convert_builtin_type(field.type, self._node_type(node)))
                 else:
                     convert = functools.partial(
                         self.convert_idiom_ast, template_id=template_id)
@@ -364,13 +394,13 @@ class IdiomAstGrammar:
                             break
 
                         child_type, child_children = child_node[0], child_node[-1]
-                        if isinstance(child_type, dict):
+                        if isinstance(child_type, dict) and 'template_id' in child_type:
                             # Another template
                             value.append(convert(child_node, seq_fragment_type=field.type if field.seq else None)(hole_values))
                             break
                         # If control reaches here, child_node is a binarizer node
                         if len(child_children) == 1:
-                            assert child_children[0][0] == 'End'
+                            assert self._node_type(child_children[0]) == 'End'
                             break
                         elif len(child_children) == 2:
                             # TODO: Sometimes we need to value.extend?
@@ -388,7 +418,7 @@ class IdiomAstGrammar:
                     else:
                         assert len(child_node[-1]) == 1
                         # type of first (and only) child of child_node
-                        if child_node[-1][0][0] == 'Null':
+                        if self._node_type(child_node[-1][0]) == 'Null':
                             value = None
                             present = False
                         else:
@@ -407,6 +437,7 @@ class IdiomAstGrammar:
                     result[field.name] = value
 
             result['_type'] = node_type
+            result['_extra_types'] = extra_types
             return result
 
         return result_creator

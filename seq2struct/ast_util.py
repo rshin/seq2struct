@@ -155,7 +155,6 @@ class ASTWrapper(object):
             self._add_constructor(sum_type_name, constructor)
 
         sum_type = self.sum_types[sum_type_name]
-        # TODO: Remove seq_fragment_tpyes if it's not useful?
         if not hasattr(sum_type, 'seq_fragment_types'):
             sum_type.seq_fragment_types = []
         sum_type.seq_fragment_types += constructors

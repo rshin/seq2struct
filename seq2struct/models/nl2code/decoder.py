@@ -190,12 +190,13 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             # Rules of the form:
             # expr -> Attribute | Await | BinOp | BoolOp | ...
             # expr_seq_elem -> Attribute | Await | ... | Template1 | Template2 | ...
-            if node_type in self.ast_wrapper.constructors:
-                sum_type_name = self.ast_wrapper.constructor_to_sum_type[node_type]
-                if is_seq_elem and self.use_seq_elem_rules:
-                    self.sum_type_constructors[sum_type_name + '_seq_elem'].add(node_type)
-                else:
-                    self.sum_type_constructors[sum_type_name].add(node_type)
+            for type_name in [node_type] + node.get('_extra_types', []):
+                if type_name in self.ast_wrapper.constructors:
+                    sum_type_name = self.ast_wrapper.constructor_to_sum_type[type_name]
+                    if is_seq_elem and self.use_seq_elem_rules:
+                        self.sum_type_constructors[sum_type_name + '_seq_elem'].add(type_name)
+                    else:
+                        self.sum_type_constructors[sum_type_name].add(type_name)
             
             # Rules of the form:
             # FunctionDef
@@ -502,7 +503,10 @@ class NL2CodeDecoder(torch.nn.Module):
                 rule = (parent_field_type, type_info.name)
                 rule_idx = self.rules_index[rule]
                 assert traversal.cur_item.state == TreeTraversal.State.SUM_TYPE_APPLY
-                traversal.step(rule_idx)
+                extra_rules = [
+                    self.rules_index[parent_field_type, extra_type]
+                    for extra_type in node.get('_extra_types', [])]
+                traversal.step(rule_idx, extra_rules)
 
             if type_info.fields:
                 # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
@@ -821,7 +825,7 @@ class TreeTraversal:
         other.update_prev_action_emb = self.update_prev_action_emb
         return other
 
-    def step(self, last_choice):
+    def step(self, last_choice, extra_choice_info=None):
         SUM_TYPE_INQUIRE    = TreeTraversal.State.SUM_TYPE_INQUIRE
         SUM_TYPE_APPLY      = TreeTraversal.State.SUM_TYPE_APPLY
         CHILDREN_INQUIRE    = TreeTraversal.State.CHILDREN_INQUIRE
@@ -834,7 +838,7 @@ class TreeTraversal:
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
         while True:
-            self.update_using_last_choice(last_choice)
+            self.update_using_last_choice(last_choice, extra_choice_info)
 
             # 1. ApplyRule, like expr -> Call
             if self.cur_item.state == SUM_TYPE_INQUIRE:
@@ -1052,27 +1056,27 @@ class TreeTraversal:
             else:
                 raise ValueError('Unknown state {}'.format(self.cur_item.state))
     
-    def update_using_last_choice(self, last_choice):
+    def update_using_last_choice(self, last_choice, extra_choice_info):
         if last_choice is None:
             return
-        self.update_prev_action_emb(self, last_choice)
+        self.update_prev_action_emb(self, last_choice, extra_choice_info)
     
     @classmethod
-    def _update_prev_action_emb_apply_rule(cls, self, last_choice):
+    def _update_prev_action_emb_apply_rule(cls, self, last_choice, extra_choice_info):
         # rule_idx shape: batch (=1)
         rule_idx = self.model._tensor([last_choice])
         # action_emb shape: batch (=1) x emb_size
         self.prev_action_emb = self.model.rule_embedding(rule_idx)
     
     @classmethod
-    def _update_prev_action_emb_gen_token(cls, self, last_choice):
+    def _update_prev_action_emb_gen_token(cls, self, last_choice, extra_choice_info):
         # token_idx shape: batch (=1), LongTensor
         token_idx = self.model._index(self.model.terminal_vocab, last_choice)
         # action_emb shape: batch (=1) x emb_size
         self.prev_action_emb = self.model.terminal_embedding(token_idx)
     
     @classmethod
-    def _update_prev_action_emb_pointer(cls, self, last_choice):
+    def _update_prev_action_emb_pointer(cls, self, last_choice, extra_choice_info):
         # TODO batching
         self.prev_action_emb = self.model.pointer_action_emb_proj[self.cur_item.node_type](
                 self.desc_enc.pointer_memories[self.cur_item.node_type][:, last_choice])
@@ -1099,17 +1103,22 @@ class TrainTreeTraversal(TreeTraversal):
     @attr.s(frozen=True)
     class XentChoicePoint:
         logits = attr.ib()
-        def compute_loss(self, outer, idx):
-            # idx shape: batch (=1)
-            idx = outer.model._tensor([idx])
-            # loss_piece shape: batch (=1)
-            return outer.model.xent_loss(self.logits, idx)
+        def compute_loss(self, outer, idx, extra_indices):
+            if extra_indices:
+                # TODO batching
+                logprobs = torch.nn.functional.log_softmax(self.logits, dim=1)
+                return -torch.logsumexp(logprobs[:, [idx] + extra_indices], dim=1)
+            else:
+                # idx shape: batch (=1)
+                idx = outer.model._tensor([idx])
+                # loss_piece shape: batch (=1)
+                return outer.model.xent_loss(self.logits, idx)
 
     @attr.s(frozen=True)
     class TokenChoicePoint:
         lstm_output = attr.ib()
         gen_logodds = attr.ib()
-        def compute_loss(self, outer, token):
+        def compute_loss(self, outer, token, extra_tokens):
             return outer.model.gen_token_loss(
                     self.lstm_output,
                     self.gen_logodds,
@@ -1136,13 +1145,13 @@ class TrainTreeTraversal(TreeTraversal):
     def pointer_choice(self, node_type, logits):
         self.choice_point = self.XentChoicePoint(logits)
 
-    def update_using_last_choice(self, last_choice):
-        super().update_using_last_choice(last_choice)
+    def update_using_last_choice(self, last_choice, extra_choice_info):
+        super().update_using_last_choice(last_choice, extra_choice_info)
         if last_choice is None:
             return
 
         self.loss = self.loss.append(
-                self.choice_point.compute_loss(self, last_choice))
+                self.choice_point.compute_loss(self, last_choice, extra_choice_info))
         self.choice_point = None
 
 
@@ -1208,8 +1217,8 @@ class InferenceTreeTraversal(TreeTraversal):
     def pointer_choice(self, node_type, logits):
         return self.model.pointer_infer(node_type, logits)
 
-    def update_using_last_choice(self, last_choice):
-        super().update_using_last_choice(last_choice)
+    def update_using_last_choice(self, last_choice, extra_choice_info):
+        super().update_using_last_choice(last_choice, extra_choice_info)
 
         # Record actions
         # CHILDREN_INQUIRE
