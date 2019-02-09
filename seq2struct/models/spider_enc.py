@@ -53,13 +53,25 @@ class SpiderEncoder(torch.nn.Module):
 
         def preprocess_item(self, item, validation_info):
             column_names = []
-            for column in item.schema.columns:
+
+            last_table_id = None
+            table_bounds = []
+
+            for i, column in enumerate(item.schema.columns):
                 table_name = ['all'] if column.table is None else column.table.name
                 column_names.append([column.type] + table_name + column.name)
+
+                table_id = None if column.table is None else column.table.id
+                if last_table_id != table_id:
+                    table_bounds.append(i)
+                    last_table_id = table_id
+            table_bounds.append(len(item.schema.columns))
+            assert len(table_bounds) == len(item.schema.tables) + 1
 
             return {
                 'question': item.text,
                 'columns': column_names,
+                'table_bounds': table_bounds,
             }
 
         def save(self):
@@ -86,7 +98,8 @@ class SpiderEncoder(torch.nn.Module):
             preproc,
             word_emb_size=128,
             recurrent_size=256,
-            dropout=0.):
+            dropout=0.,
+            table_enc='none'):
         super().__init__()
         self._device = device
         self.vocab = preproc.vocab
@@ -110,6 +123,13 @@ class SpiderEncoder(torch.nn.Module):
                 hidden_size=self.recurrent_size // 2,
                 bidirectional=True,
                 dropout=dropout)
+
+        if table_enc == 'none':
+            self._table_enc = self._table_enc_none
+        elif table_enc == 'mean_columns':
+            self._table_enc = self._table_enc_mean_columns
+        else:
+            raise ValueError(table_enc)
 
         #self.column_set_encoder = lstm.LSTM(
         #        input_size=self.recurrent_size,
@@ -147,7 +167,9 @@ class SpiderEncoder(torch.nn.Module):
             state=question_state,
             memory=question_outputs.transpose(0, 1),
             words=desc['question'],
-            pointer_memories={'column': columns_outputs})
+            pointer_memories={
+                'column': columns_outputs,
+                'table': self._table_enc(desc, columns_outputs)})
     
     def _embed_words(self, tokens, emb_module):
         # token_indices shape: batch (=1) x length
@@ -160,3 +182,15 @@ class SpiderEncoder(torch.nn.Module):
 
         # return value shape: desc length x batch (=1) x word_emb_size
         return emb.transpose(0, 1)
+    
+    def _table_enc_mean_columns(self, desc, columns_outputs):
+        # columns_outputs: batch (=1) x number of columns x recurrent size
+        # TODO batching
+        table_bounds = desc['table_bounds']
+        return torch.stack(
+           [columns_outputs[:, a:b].mean(dim=1)
+              for a, b in zip(table_bounds, table_bounds[1:])],
+           dim=1)
+
+    def _table_enc_none(self, desc, column_embs):
+        return None

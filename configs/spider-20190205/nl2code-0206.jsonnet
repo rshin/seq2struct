@@ -1,10 +1,17 @@
-local PREFIX = 'data/spider-20181217/';
-{
+local PREFIX = 'data/spider-20190205/';
+
+function (args) {
     data: {
         train: {
             name: 'spider', 
-            paths: [PREFIX + 'train_%s.json' % [s] for s in ['spider', 'others']],
-            tables_paths: [PREFIX + 'tables.json'],
+            paths: [
+              PREFIX + 'train_%s.json' % [s]
+              for s in ['spider', 'others'] + (if args.augment then ['wikisql_augment'] else [])],
+            tables_paths: [
+              PREFIX + 'tables.json',
+            ] + (
+              if args.augment then [PREFIX + 'tables_wikisql_augment.json'] else []
+            ),
         },
         val: {
             name: 'spider', 
@@ -18,19 +25,24 @@ local PREFIX = 'data/spider-20181217/';
         encoder: {
             name: 'spider',
             dropout: 0.2,
+            table_enc: if args.output_from then 'mean_columns' else 'none',
         },   
         decoder: {
             name: 'NL2Code',
             dropout: 0.2,
         },
         encoder_preproc: {
-            save_path: PREFIX + 'nl2code/',
+            save_path: PREFIX + 'nl2code-0206-%s-%s/' % [
+              if args.augment then 'aug' else 'noaug',
+              if args.output_from then 'from' else 'nofrom'],
             min_freq: 3,
             max_count: 5000,
         },
         decoder_preproc: self.encoder_preproc {
             grammar: {
               name: 'spider',
+              output_from: args.output_from,
+              use_table_pointer: args.output_from,
             },
             use_seq_elem_rules: true,
         },

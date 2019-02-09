@@ -45,61 +45,63 @@ class Schema:
 
 @registry.register('dataset', 'spider')
 class SpiderDataset(torch.utils.data.Dataset): 
-    def __init__(self, paths, tables_path, limit=None):
+    def __init__(self, paths, tables_paths, limit=None):
         self.paths = paths
         self.examples = []
         self.schemas = {}
+        schema_dicts_by_db = {}
 
-        schema_dicts  = json.load(open(tables_path))
-        for schema_dict in schema_dicts:
-            tables = tuple(
-                Table(id=i, name=name.split(), orig_name=orig_name)
-                for i, (name, orig_name) in enumerate(zip(
-                    schema_dict['table_names'], schema_dict['table_names_original']))
-            )
-            columns = tuple(
-                Column(
-                    id=i,
-                    table=tables[table_id] if table_id >= 0 else None,
-                    name=col_name.split(),
-                    orig_name=orig_col_name,
-                    type=col_type,
+        for path in tables_paths:
+            schema_dicts  = json.load(open(path))
+            for schema_dict in schema_dicts:
+                tables = tuple(
+                    Table(id=i, name=name.split(), orig_name=orig_name)
+                    for i, (name, orig_name) in enumerate(zip(
+                        schema_dict['table_names'], schema_dict['table_names_original']))
                 )
-                for i, ((table_id, col_name), (_, orig_col_name), col_type) in enumerate(zip(
-                    schema_dict['column_names'], 
-                    schema_dict['column_names_original'],
-                    schema_dict['column_types']))
-            )
+                columns = tuple(
+                    Column(
+                        id=i,
+                        table=tables[table_id] if table_id >= 0 else None,
+                        name=col_name.split(),
+                        orig_name=orig_col_name,
+                        type=col_type,
+                    )
+                    for i, ((table_id, col_name), (_, orig_col_name), col_type) in enumerate(zip(
+                        schema_dict['column_names'],
+                        schema_dict['column_names_original'],
+                        schema_dict['column_types']))
+                )
 
-            # Link columns to tables
-            for column in columns:
-                if column.table:
-                    column.table.columns.append(column)
-                    
-            for column_id in schema_dict['primary_keys']:
-                # Register primary keys
-                column = columns[column_id]
-                column.table.primary_keys.append(column)
+                # Link columns to tables
+                for column in columns:
+                    if column.table:
+                        column.table.columns.append(column)
 
-            foreign_key_graph = nx.DiGraph()            
-            for source_column_id, dest_column_id in schema_dict['foreign_keys']:
-                # Register foreign keys
-                source_column = columns[source_column_id]
-                dest_column = columns[dest_column_id]
-                source_column.foreign_key_for = dest_column
-                foreign_key_graph.add_edge(
-                    source_column.table.id,
-                    dest_column.table.id,
-                    columns=(source_column_id, dest_column_id))
-                foreign_key_graph.add_edge(
-                    dest_column.table.id,
-                    source_column.table.id,
-                    columns=(dest_column_id, source_column_id))
+                for column_id in schema_dict['primary_keys']:
+                    # Register primary keys
+                    column = columns[column_id]
+                    column.table.primary_keys.append(column)
 
-            db_id = schema_dict['db_id']
-            self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph)
+                foreign_key_graph = nx.DiGraph()
+                for source_column_id, dest_column_id in schema_dict['foreign_keys']:
+                    # Register foreign keys
+                    source_column = columns[source_column_id]
+                    dest_column = columns[dest_column_id]
+                    source_column.foreign_key_for = dest_column
+                    foreign_key_graph.add_edge(
+                        source_column.table.id,
+                        dest_column.table.id,
+                        columns=(source_column_id, dest_column_id))
+                    foreign_key_graph.add_edge(
+                        dest_column.table.id,
+                        source_column.table.id,
+                        columns=(dest_column_id, source_column_id))
 
-        schema_dicts_by_db = {s['db_id']: s for s in schema_dicts}
+                db_id = schema_dict['db_id']
+                assert db_id not in self.schemas
+                self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph)
+                schema_dicts_by_db[db_id] = schema_dict
 
         for path in paths:
             raw_data = json.load(open(path))
