@@ -5,6 +5,7 @@ import enum
 import itertools
 import json
 import os
+import operator
 import re
 
 import asdl
@@ -530,7 +531,7 @@ class NL2CodeDecoder(torch.nn.Module):
 
         loss = torch.sum(torch.stack(tuple(traversal.loss), dim=0), dim=0)
         if debug:
-            return loss, traversal.history.tolist()
+            return loss, [attr.asdict(entry) for entry in traversal.history]
         else:
             return loss
         
@@ -1103,6 +1104,14 @@ class TreeTraversal:
         raise NotImplementedError
 
 
+@attr.s
+class ChoiceHistoryEntry:
+  rule_left = attr.ib()
+  choices = attr.ib()
+  probs = attr.ib()
+  valid_choices = attr.ib()
+
+
 class TrainTreeTraversal(TreeTraversal):
 
     @attr.s(frozen=True)
@@ -1149,17 +1158,17 @@ class TrainTreeTraversal(TreeTraversal):
     def rule_choice(self, node_type, rule_logits):
         self.choice_point = self.XentChoicePoint(rule_logits)
         if self.debug:
-            top_choices = []
+            choices = []
+            probs = []
             for rule_idx, logprob in sorted(
                     self.model.rule_infer(node_type, rule_logits),
                     key=operator.itemgetter(1),
-                    reverse=True)[:5]:
+                    reverse=True):
                 _, rule = self.model.preproc.all_rules[rule_idx]
-                prob = logprob.exp().item()
-                top_choices.append((rule, prob))
-
+                choices.append(rule)
+                probs.append(logprob.exp().item())
             self.history = self.history.append(
-                    (node_type, top_choices))
+                    ChoiceHistoryEntry(node_type, choices, probs, None))
 
     def token_choice(self, output, gen_logodds):
         self.choice_point = self.TokenChoicePoint(output, gen_logodds)
@@ -1171,6 +1180,13 @@ class TrainTreeTraversal(TreeTraversal):
         super().update_using_last_choice(last_choice, extra_choice_info)
         if last_choice is None:
             return
+
+        if self.debug and isinstance(self.choice_point, self.XentChoicePoint):
+            valid_choice_indices = [last_choice] + ([] if extra_choice_info is None
+                else extra_choice_info)
+            self.history[-1].valid_choices = [
+                self.model.preproc.all_rules[rule_idx][1]
+                for rule_idx in valid_choice_indices]
 
         self.loss = self.loss.append(
                 self.choice_point.compute_loss(self, last_choice, extra_choice_info))

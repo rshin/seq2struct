@@ -32,9 +32,11 @@ class IdiomAstGrammar:
 
     pointers = {}
 
-    def __init__(self, base_grammar, template_file, root_type=None):
+    def __init__(self, base_grammar, template_file, root_type=None,
+        all_sections_rewritten=False):
         self.base_grammar = registry.construct('grammar', base_grammar)
         self.templates = json.load(open(template_file))
+        self.all_sections_rewritten = all_sections_rewritten
 
         self.ast_wrapper = self.base_grammar.ast_wrapper
         self.base_ast_wrapper = copy.deepcopy(self.ast_wrapper)
@@ -149,7 +151,7 @@ class IdiomAstGrammar:
                     field.type = types_to_replace[field.type]
 
     def parse(self, code, section):
-        if section == 'train':
+        if self.all_sections_rewritten or section == 'train':
             return self.convert_idiom_ast(code, template_id=None)()
         else:
             return self.base_grammar.parse(code, section)

@@ -7,8 +7,8 @@ function(args) {
             path: PREFIX + 'train.jsonl',
         },
         val: {
-            name: 'hearthstone', 
-            path: 'data/hearthstone/dev_hs',
+            name: 'idiom_ast', 
+            path: PREFIX + 'dev.jsonl',
         },
     },
 
@@ -34,6 +34,7 @@ function(args) {
                     name: 'python',
                 },
                 template_file: PREFIX + 'templates.json',
+                all_sections_rewritten: true,
             },
             use_seq_elem_rules: true,
         },
