@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--beam-size', required=True, type=int)
     parser.add_argument('--output-history', action='store_true')
     parser.add_argument('--limit', type=int)
+    parser.add_argument('--mode', default='infer')
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -68,29 +69,57 @@ def main():
         sliced_data = data
 
     with torch.no_grad():
-        for i, item in enumerate(tqdm.tqdm(sliced_data)):
-            beams = beam_search.beam_search(
-                    model, item, beam_size=args.beam_size, max_steps=1000)
+        if args.mode == 'infer':
+            data = registry.construct('dataset', config['data'][args.section])
+            if args.limit:
+                sliced_data = itertools.islice(data, args.limit)
+            else:
+                sliced_data = data
+            infer(model, args.beam_size, sliced_data, output)
+        elif args.mode == 'debug':
+            data = model_preproc.dataset(args.section)
+            if args.limit:
+                sliced_data = itertools.islice(data, args.limit)
+            else:
+                sliced_data = data
+            debug(model, sliced_data, output)
 
-            decoded = []
-            for beam in beams:
-                model_output, inferred_code = beam.inference_state.finalize()
 
-                decoded.append({
-                    'model_output': model_output,
-                    'inferred_code': inferred_code,
-                    'score': beam.score,
-                    **({
-                        'choice_history': beam.choice_history,
-                        'score_history': beam.score_history,
-                    } if args.output_history else {})})
+def infer(model,  beam_size, sliced_data, output):
+    for i, item in enumerate(tqdm.tqdm(sliced_data)):
+        beams = beam_search.beam_search(
+                model, item, beam_size=beam_size, max_steps=1000)
 
-            output.write(
+        decoded = []
+        for beam in beams:
+            model_output, inferred_code = beam.inference_state.finalize()
+
+            decoded.append({
+                'model_output': model_output,
+                'inferred_code': inferred_code,
+                'score': beam.score,
+                **({
+                    'choice_history': beam.choice_history,
+                    'score_history': beam.score_history,
+                } if args.output_history else {})})
+
+        output.write(
+            json.dumps({
+                'index': i,
+                'beams': decoded,
+            }) + '\n')
+        output.flush()
+
+
+def debug(model, sliced_data, output):
+    for i, item in enumerate(tqdm.tqdm(sliced_data)):
+        (_, history), = model.compute_loss([item], debug=True)
+        output.write(
                 json.dumps({
                     'index': i,
-                    'beams': decoded,
+                    'history': history,
                 }) + '\n')
-            output.flush()
+        output.flush()
 
 
 if __name__ == '__main__':

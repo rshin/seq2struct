@@ -443,8 +443,8 @@ class NL2CodeDecoder(torch.nn.Module):
 
         return all_rules, rules_mask
 
-    def compute_loss(self, example, desc_enc):
-        traversal = TrainTreeTraversal(self, desc_enc)
+    def compute_loss(self, example, desc_enc, debug=False):
+        traversal = TrainTreeTraversal(self, desc_enc, debug)
         traversal.step(None)
 
         queue = [
@@ -528,7 +528,12 @@ class NL2CodeDecoder(torch.nn.Module):
                         parent_field_type=field_info.type,
                     ))
 
-        return torch.sum(torch.stack(tuple(traversal.loss), dim=0), dim=0)
+        loss = torch.sum(torch.stack(tuple(traversal.loss), dim=0), dim=0)
+        if debug:
+            return loss, traversal.history.tolist()
+        else:
+            return loss
+        
 
     def begin_inference(self, desc_enc, example):
         traversal = InferenceTreeTraversal(self, desc_enc, example)
@@ -1125,19 +1130,36 @@ class TrainTreeTraversal(TreeTraversal):
                     token,
                     outer.desc_enc)
 
-    def __init__(self, model, desc_enc):
+    def __init__(self, model, desc_enc, debug=False):
         super().__init__(model, desc_enc)
         self.choice_point = None
         self.loss = pyrsistent.pvector()
+
+        self.debug = debug
+        self.history = pyrsistent.pvector()
 
     def clone(self):
         super_clone = super().clone()
         super_clone.choice_point = self.choice_point
         super_clone.loss = self.loss
+        super_clone.debug = self.debug
+        super_clone.history = self.history
         return super_clone
 
     def rule_choice(self, node_type, rule_logits):
         self.choice_point = self.XentChoicePoint(rule_logits)
+        if self.debug:
+            top_choices = []
+            for rule_idx, logprob in sorted(
+                    self.model.rule_infer(node_type, rule_logits),
+                    key=operator.itemgetter(1),
+                    reverse=True)[:5]:
+                _, rule = self.model.preproc.all_rules[rule_idx]
+                prob = logprob.exp().item()
+                top_choices.append((rule, prob))
+
+            self.history = self.history.append(
+                    (node_type, top_choices))
 
     def token_choice(self, output, gen_logodds):
         self.choice_point = self.TokenChoicePoint(output, gen_logodds)

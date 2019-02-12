@@ -63,13 +63,16 @@ class EncDecModel(torch.nn.Module):
         self.decoder = registry.construct(
                 'decoder', decoder, device=device, preproc=preproc.dec_preproc)
 
-    def compute_loss(self, batch):
+    def compute_loss(self, batch, debug=False):
         losses = []
         for enc_input, dec_output in batch:
             enc_state = self.encoder(enc_input)
-            loss = self.decoder.compute_loss(dec_output, enc_state)
+            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
             losses.append(loss)
-        return torch.mean(torch.stack(losses, dim=0), dim=0)
+        if debug:
+            return losses
+        else:
+            return torch.mean(torch.stack(losses, dim=0), dim=0)
 
     def eval_on_batch(self, batch):
         mean_loss = self.compute_loss(batch).item()
