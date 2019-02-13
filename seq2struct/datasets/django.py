@@ -37,6 +37,7 @@ class DjangoDataset(torch.utils.data.Dataset):
 
     @attr.s
     class Metrics:
+        dataset = attr.ib()
         exact_match = attr.ib(factory=list)
 
         def add(self, item, inferred_code, obsolete_gold_code=None):

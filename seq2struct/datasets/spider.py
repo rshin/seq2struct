@@ -5,6 +5,7 @@ import torch
 import networkx as nx
 
 from seq2struct.utils import registry
+from third_party.spider import evaluation
 
 
 @attr.s
@@ -49,6 +50,8 @@ class SpiderDataset(torch.utils.data.Dataset):
         self.paths = paths
         self.examples = []
         self.schemas = {}
+        self.eval_foreign_key_maps = {}
+
         schema_dicts_by_db = {}
 
         for path in tables_paths:
@@ -101,6 +104,7 @@ class SpiderDataset(torch.utils.data.Dataset):
                 db_id = schema_dict['db_id']
                 assert db_id not in self.schemas
                 self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph)
+                self.eval_foreign_key_maps[db_id] = evaluation.build_foreign_key_map(schema_dict)
                 schema_dicts_by_db[db_id] = schema_dict
 
         for path in paths:
@@ -119,3 +123,10 @@ class SpiderDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.examples[idx]
+
+    @attr.s
+    class Metrics:
+        dataset = attr.ib()
+
+        def add(self, item, inferred_code):
+            pass

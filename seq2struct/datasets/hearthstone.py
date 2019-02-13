@@ -75,6 +75,7 @@ class HearthstoneDataset(torch.utils.data.Dataset):
         
     @attr.s
     class Metrics:
+        dataset = attr.ib()
         exact_match = attr.ib(factory=list)
         sentence_bleu_scores = attr.ib(factory=list)
         gold_codes = attr.ib(factory=list)

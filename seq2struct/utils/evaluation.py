@@ -10,7 +10,7 @@ def compute_metrics(config_path, section, inferred_path):
 
     inferred = open(inferred_path)
     data = registry.construct('dataset', config['data'][section])
-    metrics = data.Metrics()
+    metrics = data.Metrics(data)
 
     for line in inferred:
         infer_results = json.loads(line)
