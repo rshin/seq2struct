@@ -17,6 +17,7 @@ setup(
         'numpy~=1.15.4',
         'pyrsistent~=0.14.9',
         'torch~=0.4.0',
+        'torchtext~=0.3.1',
         'tqdm~=4.28.1',
     ],
 )

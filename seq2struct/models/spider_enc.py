@@ -1,8 +1,10 @@
+import itertools
 import json
 import os
 
 import attr
 import torch
+import torchtext
 
 from seq2struct.models import abstract_preproc
 from seq2struct.models import lstm
@@ -96,6 +98,7 @@ class SpiderEncoder(torch.nn.Module):
             self,
             device,
             preproc,
+            word_emb_type='random',
             word_emb_size=128,
             recurrent_size=256,
             dropout=0.,
@@ -108,9 +111,15 @@ class SpiderEncoder(torch.nn.Module):
         self.recurrent_size = recurrent_size
         assert self.recurrent_size % 2 == 0
 
-        self.embedding = torch.nn.Embedding(
-                num_embeddings=len(self.vocab),
-                embedding_dim=self.word_emb_size)
+        if word_emb_type == 'random':
+            self.embedding = torch.nn.Embedding(
+                    num_embeddings=len(self.vocab),
+                    embedding_dim=self.word_emb_size)
+            self._embed_words = self._embed_words_learned
+        elif word_emb_type == 'glove.42B-fixed':
+            self.embedding = torchtext.vocab.GloVe(name='42B')
+            assert word_emb_size == self.embedding.dim
+            self._embed_words = self._embed_words_fixed
 
         self.question_encoder = lstm.LSTM(
                 input_size=self.word_emb_size,
@@ -139,7 +148,7 @@ class SpiderEncoder(torch.nn.Module):
 
     def forward(self, desc):
         # emb shape: desc length x batch (=1) x word_emb_size
-        question_emb = self._embed_words(desc['question'], self.embedding)
+        question_emb = self._embed_words(desc['question'])
 
         # outputs shape: desc length x batch (=1) x recurrent_size
         # state shape:
@@ -150,7 +159,7 @@ class SpiderEncoder(torch.nn.Module):
         # column_embs: list of batch (=1) x recurrent size
         column_embs = []
         for column in desc['columns']:
-            column_name_embs = self._embed_words(column, self.embedding)
+            column_name_embs = self._embed_words(column)
 
             # outputs shape: desc length x batch (=1) x recurrent_size
             # state shape:
@@ -171,18 +180,24 @@ class SpiderEncoder(torch.nn.Module):
                 'column': columns_outputs,
                 'table': self._table_enc(desc, columns_outputs)})
     
-    def _embed_words(self, tokens, emb_module):
+    def _embed_words_learned(self, tokens):
         # token_indices shape: batch (=1) x length
         token_indices = torch.tensor(
                 self.vocab.indices(tokens),
                 device=self._device).unsqueeze(0)
 
         # emb shape: batch (=1) x length x word_emb_size
-        emb = emb_module(token_indices)
+        emb = self.embedding(token_indices)
 
         # return value shape: desc length x batch (=1) x word_emb_size
         return emb.transpose(0, 1)
-    
+
+    def _embed_words_fixed(self, tokens):
+        # return value shape: desc length x batch (=1) x word_emb_size
+        return torch.stack(
+                [self.embedding[token] for token in tokens],
+                dim=0).unsqueeze(1).to(self._device)
+
     def _table_enc_mean_columns(self, desc, columns_outputs):
         # columns_outputs: batch (=1) x number of columns x recurrent size
         # TODO batching
