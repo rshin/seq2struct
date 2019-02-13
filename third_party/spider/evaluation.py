@@ -54,6 +54,9 @@ HARDNESS = {
     "component2": ('except', 'union', 'intersect')
 }
 
+LEVELS = ['easy', 'medium', 'hard', 'extra', 'all']
+PARTIAL_TYPES = ['select', 'select(no AGG)', 'where', 'where(no OP)', 'group(no Having)',
+                 'group', 'order', 'and/or', 'IUEN', 'keywords']
 
 def condition_has_or(conds):
     return 'or' in conds[1::2]
@@ -227,7 +230,8 @@ def eval_nested(pred, label):
     if label is not None:
         label_total += 1
     if pred is not None and label is not None:
-        cnt += Evaluator().eval_exact_match(pred, label)
+        partial_scores = Evaluator.eval_partial_match(pred, label)
+        cnt += Evaluator.eval_exact_match(pred, label, partial_scores)
     return label_total, pred_total, cnt
 
 
@@ -355,8 +359,30 @@ def count_others(sql):
 
 class Evaluator:
     """A simple evaluator"""
-    def __init__(self):
-        self.partial_scores = None
+    def __init__(self, db_dir, kmaps, etype):
+        self.db_dir = db_dir
+        self.kmaps = kmaps
+        self.etype = etype
+
+        self.db_paths = {}
+        self.schemas = {}
+        for db_name in self.kmaps.keys():
+            db_path = os.path.join(db_dir, db_name, db_name + '.sqlite')
+            self.db_paths[db_name] = db_path
+            self.schemas[db_name] = Schema(get_schema(db_path))
+
+        self.scores = {
+            level: {
+                'count': 0,
+                'partial': {
+                    type_: {'acc': 0., 'rec': 0., 'f1': 0.,'acc_count': 0,'rec_count': 0}
+                    for type_ in PARTIAL_TYPES
+                },
+                'exact': 0.,
+                'exec': 0,
+            }
+            for level in LEVELS
+        }
 
     def eval_hardness(self, sql):
         count_comp1_ = count_component1(sql)
@@ -375,10 +401,8 @@ class Evaluator:
         else:
             return "extra"
 
-    def eval_exact_match(self, pred, label):
-        partial_scores = self.eval_partial_match(pred, label)
-        self.partial_scores = partial_scores
-
+    @classmethod
+    def eval_exact_match(cls, pred, label, partial_scores):
         for _, score in list(partial_scores.items()):
             if score['f1'] != 1:
                 return 0
@@ -388,7 +412,8 @@ class Evaluator:
             return label_tables == pred_tables
         return 1
 
-    def eval_partial_match(self, pred, label):
+    @classmethod
+    def eval_partial_match(cls, pred, label):
         res = {}
 
         label_total, pred_total, cnt, cnt_wo_agg = eval_sel(pred, label)
@@ -429,87 +454,16 @@ class Evaluator:
 
         return res
 
+    def evaluate_one(self, db_name, gold, predicted):
+        schema = self.schemas[db_name]
+        g_sql = get_sql(schema, gold)
+        hardness = self.eval_hardness(g_sql)
+        self.scores[hardness]['count'] += 1
+        self.scores['all']['count'] += 1
 
-def isValidSQL(sql, db):
-    conn = sqlite3.connect(db)
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql)
-    except:
-        return False
-    return True
-
-
-def print_scores(scores, etype):
-    levels = ['easy', 'medium', 'hard', 'extra', 'all']
-    partial_types = ['select', 'select(no AGG)', 'where', 'where(no OP)', 'group(no Having)',
-                     'group', 'order', 'and/or', 'IUEN', 'keywords']
-
-    print("{:20} {:20} {:20} {:20} {:20} {:20}".format("", *levels))
-    counts = [scores[level]['count'] for level in levels]
-    print("{:20} {:<20d} {:<20d} {:<20d} {:<20d} {:<20d}".format("count", *counts))
-
-    if etype in ["all", "exec"]:
-        print('=====================   EXECUTION ACCURACY     =====================')
-        this_scores = [scores[level]['exec'] for level in levels]
-        print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format("execution", *this_scores))
-
-    if etype in ["all", "match"]:
-        print('\n====================== EXACT MATCHING ACCURACY =====================')
-        exact_scores = [scores[level]['exact'] for level in levels]
-        print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format("exact match", *exact_scores))
-        print('\n---------------------PARTIAL MATCHING ACCURACY----------------------')
-        for type_ in partial_types:
-            this_scores = [scores[level]['partial'][type_]['acc'] for level in levels]
-            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
-
-        print('---------------------- PARTIAL MATCHING RECALL ----------------------')
-        for type_ in partial_types:
-            this_scores = [scores[level]['partial'][type_]['rec'] for level in levels]
-            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
-
-        print('---------------------- PARTIAL MATCHING F1 --------------------------')
-        for type_ in partial_types:
-            this_scores = [scores[level]['partial'][type_]['f1'] for level in levels]
-            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
-
-
-def evaluate(gold, predict, db_dir, etype, kmaps):
-    with open(gold) as f:
-        glist = [l.strip().split('\t') for l in f.readlines() if len(l.strip()) > 0]
-
-    with open(predict) as f:
-        plist = [l.strip().split('\t') for l in f.readlines() if len(l.strip()) > 0]
-    # plist = [("select max(Share),min(Share) from performance where Type != 'terminal'", "orchestra")]
-    # glist = [("SELECT max(SHARE) ,  min(SHARE) FROM performance WHERE TYPE != 'Live final'", "orchestra")]
-    evaluator = Evaluator()
-
-    levels = ['easy', 'medium', 'hard', 'extra', 'all']
-    partial_types = ['select', 'select(no AGG)', 'where', 'where(no OP)', 'group(no Having)',
-                     'group', 'order', 'and/or', 'IUEN', 'keywords']
-    entries = []
-    scores = {}
-
-    for level in levels:
-        scores[level] = {'count': 0, 'partial': {}, 'exact': 0.}
-        scores[level]['exec'] = 0
-        for type_ in partial_types:
-            scores[level]['partial'][type_] = {'acc': 0., 'rec': 0., 'f1': 0.,'acc_count':0,'rec_count':0}
-
-    eval_err_num = 0
-    for p, g in zip(plist, glist):
-        p_str = p[0]
-        g_str, db = g
-        db_name = db
-        db = os.path.join(db_dir, db, db + ".sqlite")
-        schema = Schema(get_schema(db))
-        g_sql = get_sql(schema, g_str)
-        hardness = evaluator.eval_hardness(g_sql)
-        scores[hardness]['count'] += 1
-        scores['all']['count'] += 1
-
+        parse_error = False
         try:
-            p_sql = get_sql(schema, p_str)
+            p_sql = get_sql(schema, predicted)
         except:
             # If p_sql is not valid, then we will use an empty sql to evaluate with the correct sql
             p_sql = {
@@ -530,11 +484,12 @@ def evaluate(gold, predict, db_dir, etype, kmaps):
             "union": None,
             "where": []
             }
-            eval_err_num += 1
-            print(("eval_err_num:{}".format(eval_err_num)))
+
+            # TODO fix
+            parse_error = True
 
         # rebuild sql for value evaluation
-        kmap = kmaps[db_name]
+        kmap = self.kmaps[db_name]
         g_valid_col_units = build_valid_col_units(g_sql['from']['table_units'], schema)
         g_sql = rebuild_sql_val(g_sql)
         g_sql = rebuild_sql_col(g_valid_col_units, g_sql, kmap)
@@ -543,70 +498,128 @@ def evaluate(gold, predict, db_dir, etype, kmaps):
         p_sql = rebuild_sql_col(p_valid_col_units, p_sql, kmap)
 
         if etype in ["all", "exec"]:
-            exec_score = eval_exec_match(db, p_str, g_str, p_sql, g_sql)
-            if exec_score:
-                scores[hardness]['exec'] += 1
+            self.scores[hardness]['exec'] += eval_exec_match(self.db_paths[db_name], predicted, gold, p_sql, g_sql)
 
         if etype in ["all", "match"]:
-            exact_score = evaluator.eval_exact_match(p_sql, g_sql)
-            partial_scores = evaluator.partial_scores
-            if exact_score == 0:
-                print(("{} pred: {}".format(hardness,p_str)))
-                print(("{} gold: {}".format(hardness,g_str)))
-                print("")
-            scores[hardness]['exact'] += exact_score
-            scores['all']['exact'] += exact_score
-            for type_ in partial_types:
+            partial_scores = self.eval_partial_match(p_sql, g_sql)
+            exact_score = self.eval_exact_match(p_sql, g_sql, partial_scores)
+            self.scores[hardness]['exact'] += exact_score
+            self.scores['all']['exact'] += exact_score
+            for type_ in PARTIAL_TYPES:
                 if partial_scores[type_]['pred_total'] > 0:
-                    scores[hardness]['partial'][type_]['acc'] += partial_scores[type_]['acc']
-                    scores[hardness]['partial'][type_]['acc_count'] += 1
+                    self.scores[hardness]['partial'][type_]['acc'] += partial_scores[type_]['acc']
+                    self.scores[hardness]['partial'][type_]['acc_count'] += 1
                 if partial_scores[type_]['label_total'] > 0:
-                    scores[hardness]['partial'][type_]['rec'] += partial_scores[type_]['rec']
-                    scores[hardness]['partial'][type_]['rec_count'] += 1
-                scores[hardness]['partial'][type_]['f1'] += partial_scores[type_]['f1']
+                    self.scores[hardness]['partial'][type_]['rec'] += partial_scores[type_]['rec']
+                    self.scores[hardness]['partial'][type_]['rec_count'] += 1
+                self.scores[hardness]['partial'][type_]['f1'] += partial_scores[type_]['f1']
                 if partial_scores[type_]['pred_total'] > 0:
-                    scores['all']['partial'][type_]['acc'] += partial_scores[type_]['acc']
-                    scores['all']['partial'][type_]['acc_count'] += 1
+                    self.scores['all']['partial'][type_]['acc'] += partial_scores[type_]['acc']
+                    self.scores['all']['partial'][type_]['acc_count'] += 1
                 if partial_scores[type_]['label_total'] > 0:
-                    scores['all']['partial'][type_]['rec'] += partial_scores[type_]['rec']
-                    scores['all']['partial'][type_]['rec_count'] += 1
-                scores['all']['partial'][type_]['f1'] += partial_scores[type_]['f1']
+                    self.scores['all']['partial'][type_]['rec'] += partial_scores[type_]['rec']
+                    self.scores['all']['partial'][type_]['rec_count'] += 1
+                self.scores['all']['partial'][type_]['f1'] += partial_scores[type_]['f1']
 
-            entries.append({
-                'predictSQL': p_str,
-                'goldSQL': g_str,
-                'hardness': hardness,
-                'exact': exact_score,
-                'partial': partial_scores
-            })
+        return {
+            'predicted': predicted,
+            'gold': gold,
+            'predicted_parse_error': parse_error,
+            'hardness': hardness,
+            'exact': exact_score,
+            'partial': partial_scores
+        }
 
-    for level in levels:
-        if scores[level]['count'] == 0:
-            continue
-        if etype in ["all", "exec"]:
-            scores[level]['exec'] /= scores[level]['count']
+    def finalize(self):
+        scores = self.scores
+        for level in LEVELS:
+            if scores[level]['count'] == 0:
+                continue
+            if self.etype in ["all", "exec"]:
+                scores[level]['exec'] /= scores[level]['count']
 
-        if etype in ["all", "match"]:
-            scores[level]['exact'] /= scores[level]['count']
-            for type_ in partial_types:
-                if scores[level]['partial'][type_]['acc_count'] == 0:
-                    scores[level]['partial'][type_]['acc'] = 0
-                else:
-                    scores[level]['partial'][type_]['acc'] = scores[level]['partial'][type_]['acc'] / \
-                                                             scores[level]['partial'][type_]['acc_count'] * 1.0
-                if scores[level]['partial'][type_]['rec_count'] == 0:
-                    scores[level]['partial'][type_]['rec'] = 0
-                else:
-                    scores[level]['partial'][type_]['rec'] = scores[level]['partial'][type_]['rec'] / \
-                                                             scores[level]['partial'][type_]['rec_count'] * 1.0
-                if scores[level]['partial'][type_]['acc'] == 0 and scores[level]['partial'][type_]['rec'] == 0:
-                    scores[level]['partial'][type_]['f1'] = 1
-                else:
-                    scores[level]['partial'][type_]['f1'] = \
-                        2.0 * scores[level]['partial'][type_]['acc'] * scores[level]['partial'][type_]['rec'] / (
-                        scores[level]['partial'][type_]['rec'] + scores[level]['partial'][type_]['acc'])
+            if self.etype in ["all", "match"]:
+                scores[level]['exact'] /= scores[level]['count']
+                for type_ in PARTIAL_TYPES:
+                    if scores[level]['partial'][type_]['acc_count'] == 0:
+                        scores[level]['partial'][type_]['acc'] = 0
+                    else:
+                        scores[level]['partial'][type_]['acc'] = scores[level]['partial'][type_]['acc'] / \
+                                                                 scores[level]['partial'][type_]['acc_count'] * 1.0
+                    if scores[level]['partial'][type_]['rec_count'] == 0:
+                        scores[level]['partial'][type_]['rec'] = 0
+                    else:
+                        scores[level]['partial'][type_]['rec'] = scores[level]['partial'][type_]['rec'] / \
+                                                                 scores[level]['partial'][type_]['rec_count'] * 1.0
+                    if scores[level]['partial'][type_]['acc'] == 0 and scores[level]['partial'][type_]['rec'] == 0:
+                        scores[level]['partial'][type_]['f1'] = 1
+                    else:
+                        scores[level]['partial'][type_]['f1'] = \
+                            2.0 * scores[level]['partial'][type_]['acc'] * scores[level]['partial'][type_]['rec'] / (
+                            scores[level]['partial'][type_]['rec'] + scores[level]['partial'][type_]['acc'])
 
-    print_scores(scores, etype)
+
+def isValidSQL(sql, db):
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql)
+    except:
+        return False
+    return True
+
+
+def print_scores(scores, etype):
+    LEVELS = ['easy', 'medium', 'hard', 'extra', 'all']
+    PARTIAL_TYPES = ['select', 'select(no AGG)', 'where', 'where(no OP)', 'group(no Having)',
+                     'group', 'order', 'and/or', 'IUEN', 'keywords']
+
+    print("{:20} {:20} {:20} {:20} {:20} {:20}".format("", *LEVELS))
+    counts = [scores[level]['count'] for level in LEVELS]
+    print("{:20} {:<20d} {:<20d} {:<20d} {:<20d} {:<20d}".format("count", *counts))
+
+    if etype in ["all", "exec"]:
+        print('=====================   EXECUTION ACCURACY     =====================')
+        this_scores = [scores[level]['exec'] for level in LEVELS]
+        print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format("execution", *this_scores))
+
+    if etype in ["all", "match"]:
+        print('\n====================== EXACT MATCHING ACCURACY =====================')
+        exact_scores = [scores[level]['exact'] for level in LEVELS]
+        print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format("exact match", *exact_scores))
+        print('\n---------------------PARTIAL MATCHING ACCURACY----------------------')
+        for type_ in PARTIAL_TYPES:
+            this_scores = [scores[level]['partial'][type_]['acc'] for level in LEVELS]
+            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
+
+        print('---------------------- PARTIAL MATCHING RECALL ----------------------')
+        for type_ in PARTIAL_TYPES:
+            this_scores = [scores[level]['partial'][type_]['rec'] for level in LEVELS]
+            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
+
+        print('---------------------- PARTIAL MATCHING F1 --------------------------')
+        for type_ in PARTIAL_TYPES:
+            this_scores = [scores[level]['partial'][type_]['f1'] for level in LEVELS]
+            print("{:20} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f} {:<20.3f}".format(type_, *this_scores))
+
+
+def evaluate(gold, predict, db_dir, etype, kmaps):
+    with open(gold) as f:
+        glist = [l.strip().split('\t') for l in f.readlines() if len(l.strip()) > 0]
+
+    with open(predict) as f:
+        plist = [l.strip().split('\t') for l in f.readlines() if len(l.strip()) > 0]
+    # plist = [("select max(Share),min(Share) from performance where Type != 'terminal'", "orchestra")]
+    # glist = [("SELECT max(SHARE) ,  min(SHARE) FROM performance WHERE TYPE != 'Live final'", "orchestra")]
+    evaluator = Evaluator(db_dir, kmaps, etype)
+
+    for p, g in zip(plist, glist):
+        predicted, = p
+        gold, db_name = g
+        evaluator.evaluate_one(db_name, gold, predicted)
+    evaluator.finalize()
+
+    print_scores(evaluator.scores, etype)
 
 
 def eval_exec_match(db, p_str, g_str, pred, gold):
