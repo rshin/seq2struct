@@ -11,11 +11,15 @@ from seq2struct.utils import registry
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
+    parser.add_argument('--config-args')
     parser.add_argument('--section', required=True)
     parser.add_argument('--inferred', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    config = json.loads(_jsonnet.evaluate_file(args.config))
+    if args.config_args:
+        config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
+    else:
+        config = json.loads(_jsonnet.evaluate_file(args.config))
 
     os.makedirs(args.output, exist_ok=True)
     gold = open(os.path.join(args.output, 'gold.txt'), 'w')

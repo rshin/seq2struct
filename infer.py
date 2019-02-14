@@ -75,7 +75,7 @@ def main():
                 sliced_data = itertools.islice(data, args.limit)
             else:
                 sliced_data = data
-            infer(model, args.beam_size, sliced_data, output)
+            infer(model, args.beam_size, args.output_history, sliced_data, output)
         elif args.mode == 'debug':
             data = model_preproc.dataset(args.section)
             if args.limit:
@@ -85,7 +85,7 @@ def main():
             debug(model, sliced_data, output)
 
 
-def infer(model,  beam_size, sliced_data, output):
+def infer(model, beam_size, output_history, sliced_data, output):
     for i, item in enumerate(tqdm.tqdm(sliced_data)):
         beams = beam_search.beam_search(
                 model, item, beam_size=beam_size, max_steps=1000)
@@ -101,7 +101,7 @@ def infer(model,  beam_size, sliced_data, output):
                 **({
                     'choice_history': beam.choice_history,
                     'score_history': beam.score_history,
-                } if args.output_history else {})})
+                } if output_history else {})})
 
         output.write(
             json.dumps({
