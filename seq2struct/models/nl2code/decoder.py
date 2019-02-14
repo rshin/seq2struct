@@ -20,6 +20,7 @@ from seq2struct.models import attention
 from seq2struct.models import lstm
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
+from seq2struct.utils import serialization
 
 
 def lstm_init(device, num_layers, hidden_size, *batch_sizes):
@@ -38,29 +39,6 @@ def maybe_stack(items, dim=None):
         return to_stack[0].unsqueeze(dim)
     else:
         return torch.stack(to_stack, dim)
-
-
-def to_dict_with_sorted_values(d, key=None):
-    return {k: sorted(v, key=key) for k, v in d.items()}
-
-
-def to_dict_with_set_values(d):
-    result = {}
-    for k, v in d.items():
-        hashable_v = []
-        for v_elem in v:
-            if isinstance(v_elem, list):
-                hashable_v.append(tuple(v_elem))
-            else:
-                hashable_v.append(v_elem)
-        result[k] = set(hashable_v)
-    return result
-
-
-def tuplify(x):
-    if not isinstance(x, (tuple, list)):
-        return x
-    return tuple(tuplify(elem) for elem in x)
 
 
 def accumulate_logprobs(d, keys_and_logprobs):
@@ -141,11 +119,11 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
                     f.write(json.dumps(attr.asdict(item)) + '\n')
 
         # observed_productions
-        self.sum_type_constructors = to_dict_with_sorted_values(
+        self.sum_type_constructors = serialization.to_dict_with_sorted_values(
             self.sum_type_constructors)
-        self.field_presence_infos = to_dict_with_sorted_values(
+        self.field_presence_infos = serialization.to_dict_with_sorted_values(
             self.field_presence_infos, key=str)
-        self.seq_lengths = to_dict_with_sorted_values(
+        self.seq_lengths = serialization.to_dict_with_sorted_values(
             self.seq_lengths)
         self.primitive_types = sorted(self.primitive_types)
         with open(self.observed_productions_path, 'w') as f:
@@ -174,7 +152,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.primitive_types = observed_productions['primitive_types']
 
         grammar = json.load(open(self.grammar_rules_path))
-        self.all_rules = tuplify(grammar['all_rules'])
+        self.all_rules = serialization.tuplify(grammar['all_rules'])
         self.rules_mask = grammar['rules_mask']
 
     def dataset(self, section):

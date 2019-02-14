@@ -1,3 +1,4 @@
+import collections
 import itertools
 import json
 import os
@@ -8,8 +9,10 @@ import torchtext
 
 from seq2struct.models import abstract_preproc
 from seq2struct.models import lstm
+from seq2struct.models import spider_enc_modules
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
+from seq2struct.utils import serialization
 
 @attr.s
 class SpiderEncoderState:
@@ -209,3 +212,207 @@ class SpiderEncoder(torch.nn.Module):
 
     def _table_enc_none(self, desc, column_embs):
         return None
+
+
+@registry.register('encoder', 'spiderv2')
+class SpiderEncoderV2(torch.nn.Module):
+    class Preproc(abstract_preproc.AbstractPreproc):
+        def __init__(
+                self,
+                save_path,
+                min_freq=3,
+                max_count=5000,
+                include_table_name_in_column=True):
+            self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
+            self.data_dir = os.path.join(save_path, 'enc')
+            self.include_table_name_in_column = include_table_name_in_column
+
+            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+            # TODO: Write 'train', 'val', 'test' somewhere else
+            self.texts = {'train': [], 'val': [], 'test': []}
+
+            self.vocab = None
+
+        def validate_item(self, item, section):
+            return True, None
+        
+        def add_item(self, item, section, validation_info):
+            preprocessed = self.preprocess_item(item, validation_info)
+            self.texts[section].append(preprocessed)
+
+            if section == 'train':
+                for token in itertools.chain(
+                        preprocessed['question'],
+                        *preprocessed['columns']):
+                    self.vocab_builder.add_word(token)
+
+        def preprocess_item(self, item, validation_info):
+            column_names = []
+            table_names = []
+            table_bounds = []
+            column_to_table = {}
+            foreign_keys = {}
+            foreign_keys_tables = collections.defaultdict(set)
+
+            # TODO: things in brackets won't work with fixed embeddings
+            last_table_id = None
+            for i, column in enumerate(item.schema.columns):
+                table_name = ['<any-table>'] if column.table is None else column.table.name
+
+                column_name = ['<type: {}>'.format(column.type)] + column.name
+                if self.include_table_name_in_column:
+                    column_name += ['<table-sep>'] + table_name
+                column_names.append(column_name)
+
+                table_id = None if column.table is None else column.table.id
+                column_to_table[i] = table_id
+                if last_table_id != table_id:
+                    table_bounds.append(i)
+                    last_table_id = table_id
+
+                if column.foreign_key_for is not None:
+                    foreign_keys[column.id] = column.foreign_key_for.id
+                    foreign_keys_tables[column.table.id].add(column.foreign_key_for.table.id)
+
+            table_bounds.append(len(item.schema.columns))
+            assert len(table_bounds) == len(item.schema.tables) + 1
+
+            for i, table in enumerate(item.schema.tables):
+                table_names.append(table.name)
+
+            return {
+                'question': item.text,
+                'columns': col8umn_names,
+                'tables': table_names,
+                'table_bounds': table_bounds,
+                'column_to_table': column_to_table,
+                'foreign_keys': foreign_keys,
+                'foreign_keys_tables': serialization.to_dict_with_sorted_values(foreign_keys_tables),
+                'primary_keys': [
+                    column.id
+                    for column in table.primary_keys 
+                    for table in item.schema.tables
+                ],
+            }
+
+        def save(self):
+            os.makedirs(self.data_dir, exist_ok=True)
+            self.vocab = self.vocab_builder.finish()
+            self.vocab.save(self.vocab_path)
+
+            for section, texts in self.texts.items():
+                with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+                    for text in texts:
+                        f.write(json.dumps(text) + '\n')
+
+        def load(self):
+            self.vocab = vocab.Vocab.load(self.vocab_path)
+
+        def dataset(self, section):
+            return [
+                json.loads(line)
+                for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+
+    def __init__(
+            self,
+            device,
+            preproc,
+            word_emb_size=128,
+            recurrent_size=256,
+            dropout=0.,
+            question_encoder=('emb', 'bilstm'),
+            column_encoder=('emb', 'bilstm'),
+            table_encoder=('emb', 'bilstm'),
+            update_config={},
+            include_in_memory=('question', 'column', 'table')
+            ):
+        super().__init__()
+        self._device = device
+        self.vocab = preproc.vocab
+
+        self.word_emb_size = word_emb_size
+        self.recurrent_size = recurrent_size
+        assert self.recurrent_size % 2 == 0
+        self.include_in_memory = set(include_in_memory)
+        self.dropout = dropout
+
+        self.question_encoder = self._build_modules(question_encoder)
+        self.column_encoder = self._build_modules(column_encoder)
+        self.table_encoder = self._build_modules(table_encoder)
+        self.encs_update = registry.instantiate(
+            spider_enc_modules.RelationalTransformerUpdate,
+            update_config,
+            device=self._device,
+            hidden_size=recurrent_size,
+            )
+
+    def _build_modules(self, module_types):
+        module_builder = {
+            'emb': lambda: spider_enc_modules.LookupEmbeddings(
+                self._device,
+                self.vocab,
+                self.word_emb_size),
+            'bilstm': lambda: spider_enc_modules.BiLSTM(
+                input_size=self.word_emb_size,
+                output_size=self.recurrent_size,
+                dropout=self.dropout,
+                summarize=False),
+            'bilstm-summarize': lambda: spider_enc_modules.BiLSTM(
+                input_size=self.word_emb_size,
+                output_size=self.recurrent_size,
+                dropout=self.dropout,
+                summarize=True),
+        }
+
+        modules = []
+        for module_type in module_types:
+            modules.append(module_builder[module_type]())
+        return torch.nn.Sequential(*modules)
+
+
+    def forward(self, desc):
+        # Encode the question
+        # - LookupEmbeddings
+        # - Transform embeddings wrt each other?
+
+        # q_enc: question len x batch (=1) x recurrent_size
+        q_enc, (_, _) = self.question_encoder([desc['question']])
+
+        # Encode the columns
+        # - LookupEmbeddings
+        # - Transform embeddings wrt each other?
+        # - Summarize each column into one?
+        # c_enc: sum of column lens x batch (=1) x recurrent_size
+        c_enc, c_boundaries = self.column_encoder(desc['columns'])
+
+        # Encode the tables
+        # - LookupEmbeddings
+        # - Transform embeddings wrt each other?
+        # - Summarize each table into one?
+        # t_enc: sum of table lens x batch (=1) x recurrent_size
+        t_enc, t_boundaries = self.table_encoder(desc['tables'])
+
+        # Update each other using self-attention
+        # q_enc_new, c_enc_new, and t_enc_new now have shape
+        # batch (=1) x length x recurrent_size
+        q_enc_new, c_enc_new, t_enc_new = self.encs_update(
+                desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
+        
+        memory = []
+        if 'question' in self.include_in_memory:
+            memory.append(q_enc_new)
+        if 'column' in self.include_in_memory:
+            memory.append(c_enc_new)
+        if 'table' in self.include_in_memory:
+            memory.append(t_enc_new)
+        memory = torch.cat(memory, dim=1)
+
+        return SpiderEncoderState(
+            state=None,
+            memory=memory,
+            words=desc['question'],
+            pointer_memories={
+                'column': c_enc_new,
+                'table': t_enc_new,
+            },
+        )
