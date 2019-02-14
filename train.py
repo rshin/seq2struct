@@ -112,6 +112,10 @@ def main():
     model.to(device)
 
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
+    lr_scheduler = registry.construct(
+            'lr_scheduler', 
+            config.get('lr_scheduler', {'name': 'noop'}),
+            optimizer=optimizer)
 
     # 2. Restore its parameters
     saver = saver_mod.Saver(
@@ -150,12 +154,12 @@ def main():
                 eval_model(logger, model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
             if train_config.eval_on_val:
                 eval_model(logger, model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
-
+        
         # Compute and apply gradient
-        # TODO: update learning rate
         optimizer.zero_grad()
         loss = model.compute_loss(batch)
         loss.backward()
+        lr_scheduler.update_lr(last_step)
         optimizer.step()
 
         # Report metrics
