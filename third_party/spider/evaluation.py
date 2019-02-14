@@ -612,14 +612,18 @@ def evaluate(gold, predict, db_dir, etype, kmaps):
     # plist = [("select max(Share),min(Share) from performance where Type != 'terminal'", "orchestra")]
     # glist = [("SELECT max(SHARE) ,  min(SHARE) FROM performance WHERE TYPE != 'Live final'", "orchestra")]
     evaluator = Evaluator(db_dir, kmaps, etype)
-
+    results = []
     for p, g in zip(plist, glist):
         predicted, = p
         gold, db_name = g
-        evaluator.evaluate_one(db_name, gold, predicted)
+        results.append(evaluator.evaluate_one(db_name, gold, predicted))
     evaluator.finalize()
 
     print_scores(evaluator.scores, etype)
+    return {
+        'per_item': results,
+        'total_scores': evaluator.scores,
+    }
 
 
 def eval_exec_match(db, p_str, g_str, pred, gold):
@@ -864,6 +868,7 @@ if __name__ == "__main__":
     parser.add_argument('--db', dest='db', type=str)
     parser.add_argument('--table', dest='table', type=str)
     parser.add_argument('--etype', dest='etype', type=str)
+    parser.add_argument('--output')
     args = parser.parse_args()
 
     gold = args.gold
@@ -876,4 +881,7 @@ if __name__ == "__main__":
 
     kmaps = build_foreign_key_map_from_json(table)
 
-    evaluate(gold, pred, db_dir, etype, kmaps)
+    results = evaluate(gold, pred, db_dir, etype, kmaps)
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(results, f)
