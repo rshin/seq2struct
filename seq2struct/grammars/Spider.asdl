@@ -10,6 +10,7 @@ module Spider
         | String(string s)
         | ValSql(sql s)
         | ColUnit(col_unit c)
+        | Terminal
 
     -- col_unit: (agg_id, col_id, isDistinct(bool))
     col_unit = (

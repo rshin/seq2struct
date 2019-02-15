@@ -12,6 +12,7 @@ from seq2struct import datasets
 from seq2struct import grammars
 
 from seq2struct.utils import registry
+from third_party.spider import evaluation
 
 
 def main():
@@ -33,12 +34,22 @@ def main():
     train_data = registry.construct('dataset', config['data']['train'])
     grammar = registry.construct('grammar', config['model']['decoder_preproc']['grammar'])
 
+    evaluator = evaluation.Evaluator(
+            'data/spider-20181217/database',
+            evaluation.build_foreign_key_map_from_json('data/spider-20181217/tables.json'),
+            'match')
+
     for i, item in enumerate(tqdm.tqdm(train_data, dynamic_ncols=True)):
         parsed = grammar.parse(item.code, 'train')
-        sql = grammar.unparse(parsed, item.schema)
+        sql = grammar.unparse(parsed, item)
 
-        gold.write('{}\t{}\n'.format(item.orig['query'].replace('\t', ' '), item.schema.db_id))
-        predicted.write('{}\n'.format(sql))
+        evaluator.evaluate_one(
+                item.schema.db_id,
+                item.orig['query'].replace('\t', ' '),
+                sql)
+
+        #gold.write('{}\t{}\n'.format(item.orig['query'].replace('\t', ' '), item.schema.db_id))
+        #predicted.write('{}\n'.format(sql))
 
 if __name__ == '__main__':
     main()

@@ -38,7 +38,11 @@ class SpiderLanguage:
 
     root_type = 'sql'
 
-    def __init__(self, output_from=False, use_table_pointer=False):
+    def __init__(
+            self, 
+            output_from=False,
+            use_table_pointer=False,
+            include_literals=True):
         if use_table_pointer:
             custom_primitive_type_checkers = {
                 'column': lambda x: isinstance(x, int),
@@ -58,12 +62,18 @@ class SpiderLanguage:
                         'Spider.asdl')),
                 custom_primitive_type_checkers=custom_primitive_type_checkers)
         self.output_from = output_from
+        self.include_literals = include_literals
         if not self.output_from:
             sql_fields = self.ast_wrapper.product_types['sql'].fields
             assert sql_fields[1].name == 'from'
             del sql_fields[1]
         if not use_table_pointer:
             self.ast_wrapper.singular_types['Table'].fields[0].type = 'int'
+        if not include_literals:
+            sql_fields = self.ast_wrapper.singular_types['sql'].fields
+            assert sql_fields[6].name == 'limit'
+            sql_fields[6].opt = False
+            sql_fields[6].type = 'singleton'
 
     def parse(self, code, section):
         return self.parse_sql(code)
@@ -91,6 +101,8 @@ class SpiderLanguage:
 
     def parse_val(self, val):
         if isinstance(val, str):
+            if not self.include_literals:
+                return {'_type': 'Terminal'}
             return {
                     '_type': 'String',
                     's': val,
@@ -101,6 +113,8 @@ class SpiderLanguage:
                     'c': self.parse_col_unit(val),
             }
         elif isinstance(val, float):
+            if not self.include_literals:
+                return {'_type': 'Terminal'}
             return {
                     '_type': 'Number',
                     'f': val,
@@ -183,7 +197,7 @@ class SpiderLanguage:
                 'group_by': [self.parse_col_unit(u) for u in sql['groupBy']],
                 'order_by': self.parse_order_by(sql['orderBy']),
                 'having': self.parse_cond(sql['having'], optional=True),
-                'limit': sql['limit'],
+                'limit': sql['limit'] if self.include_literals else (sql['limit'] is not None),
                 'intersect': self.parse_sql(sql['intersect'], optional=True),
                 'except': self.parse_sql(sql['except'], optional=True),
                 'union': self.parse_sql(sql['union'], optional=True),
@@ -294,6 +308,8 @@ class SpiderUnparser:
             return [cond], []
 
     def unparse_val(self, val):
+        if val['_type'] == 'Terminal':
+            return "'terminal'"
         if val['_type'] == 'String':
             return val['s']
         if val['_type'] == 'ColUnit':
@@ -446,7 +462,11 @@ class SpiderUnparser:
             result.append(self.unparse_order_by(tree['order_by']))
         # int? limit, 
         if 'limit' in tree:
-            result += ['LIMIT', str(tree['limit'])]
+            if isinstance(tree['limit'], bool):
+                if tree['limit']:
+                    result += ['LIMIT', '1']
+            else:
+                result += ['LIMIT', str(tree['limit'])]
 
         # sql? intersect,
         if 'intersect' in tree:

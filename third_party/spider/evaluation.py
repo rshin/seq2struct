@@ -497,10 +497,10 @@ class Evaluator:
         p_sql = rebuild_sql_val(p_sql)
         p_sql = rebuild_sql_col(p_valid_col_units, p_sql, kmap)
 
-        if etype in ["all", "exec"]:
+        if self.etype in ["all", "exec"]:
             self.scores[hardness]['exec'] += eval_exec_match(self.db_paths[db_name], predicted, gold, p_sql, g_sql)
 
-        if etype in ["all", "match"]:
+        if self.etype in ["all", "match"]:
             partial_scores = self.eval_partial_match(p_sql, g_sql)
             exact_score = self.eval_exact_match(p_sql, g_sql, partial_scores)
             self.scores[hardness]['exact'] += exact_score

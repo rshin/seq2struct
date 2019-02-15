@@ -99,15 +99,15 @@ class RelationalTransformerUpdate(torch.nn.Module):
             ff_size=None,
             dropout=0.1,
             qq_max_dist=2,
-            qc_token_match=True,
-            qt_token_match=True,
-            cq_token_match=True,
+            #qc_token_match=True,
+            #qt_token_match=True,
+            #cq_token_match=True,
             cc_foreign_key=True,
             cc_table_match=True,
             cc_max_dist=2,
             ct_foreign_key=True,
             ct_table_match=True,
-            tq_token_match=True,
+            #tq_token_match=True,
             tc_table_match=True,
             tc_foreign_key=True,
             tt_max_dist=2,
@@ -117,15 +117,15 @@ class RelationalTransformerUpdate(torch.nn.Module):
         self._device = device
 
         self.qq_max_dist    = qq_max_dist
-        self.qc_token_match = qc_token_match
-        self.qt_token_match = qt_token_match
-        self.cq_token_match = cq_token_match
+        #self.qc_token_match = qc_token_match
+        #self.qt_token_match = qt_token_match
+        #self.cq_token_match = cq_token_match
         self.cc_foreign_key = cc_foreign_key
         self.cc_table_match = cc_table_match
         self.cc_max_dist    = cc_max_dist
         self.ct_foreign_key = ct_foreign_key
         self.ct_table_match = ct_table_match
-        self.tq_token_match = tq_token_match
+        #self.tq_token_match = tq_token_match
         self.tc_table_match = tc_table_match
         self.tc_foreign_key = tc_foreign_key
         self.tt_max_dist    = tt_max_dist
@@ -326,3 +326,12 @@ class RelationalTransformerUpdate(torch.nn.Module):
 
         foreign_table = desc['column_to_table'][str(foreign_key_for)]
         return desc['column_to_table'][str(col)] == foreign_table
+
+
+class NoOpUpdate:
+    def __init__(self, device, hidden_size):
+        pass
+
+    def __call__(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
+        return q_enc.transpose(0, 1), c_enc.transpose(0, 1), t_enc.transpose(0, 1)
+

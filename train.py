@@ -95,6 +95,8 @@ def main():
     else:
         config = json.loads(_jsonnet.evaluate_file(args.config))
 
+    if 'model_name' in config:
+        args.logdir = os.path.join(args.logdir, config['model_name'])
     train_config = registry.instantiate(TrainConfig, config['train'])
 
     logger = Logger(os.path.join(args.logdir, 'log.txt'))

@@ -292,7 +292,7 @@ class NL2CodeDecoder(torch.nn.Module):
             enc_recurrent_size=256,
             recurrent_size=256,
             dropout=0.,
-            desc_attn=None,
+            desc_attn='bahdanau',
             copy_pointer=None):
         super().__init__()
         self._device = device
@@ -328,11 +328,16 @@ class NL2CodeDecoder(torch.nn.Module):
                 input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
                 hidden_size=self.recurrent_size,
                 dropout=dropout)
-        if desc_attn is None:
+        if desc_attn == 'bahdanau':
             self.desc_attn = attention.BahdanauAttention(
                     query_size=self.recurrent_size,
                     value_size=self.enc_recurrent_size,
                     proj_size=50)
+        elif desc_attn == 'mha':
+            self.desc_attn = attention.MultiHeadedAttention(
+                    h=8,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)
         else:
             # TODO: Figure out how to get right sizes (query, value) to module
             self.desc_attn = desc_attn
@@ -458,7 +463,12 @@ class NL2CodeDecoder(torch.nn.Module):
             if parent_field_type in self.preproc.grammar.pointers:
                 assert isinstance(node, int)
                 assert traversal.cur_item.state == TreeTraversal.State.POINTER_APPLY
-                traversal.step(node)
+                pointer_map = desc_enc.pointer_maps.get(parent_field_type)
+                if pointer_map:
+                    values = pointer_map[node]
+                    traversal.step(values[0], values[1:])
+                else:
+                    traversal.step(node)
                 continue
 
             if parent_field_type in self.ast_wrapper.primitive_types:
@@ -1231,7 +1241,21 @@ class InferenceTreeTraversal(TreeTraversal):
         return self.model.token_infer(output, gen_logodds, self.desc_enc)
 
     def pointer_choice(self, node_type, logits):
-        return self.model.pointer_infer(node_type, logits)
+        # Group them based on pointer map
+        pointer_logprobs = self.model.pointer_infer(node_type, logits)
+        pointer_map = self.desc_enc.pointer_map.get(node_type)
+        if not pointer_map:
+            return pointer_logprobs
+
+        pointer_logprobs = dict(pointer_logprobs)
+        return [
+            (orig_index, torch.logsumexp(
+                torch.stack(
+                    tuple(pointer_logprobs[i] for i in mapped_indices),
+                    dim=0),
+                dim=0))
+            for orig_index, mapped_indices in pointer_map
+        ]
 
     def update_using_last_choice(self, last_choice, extra_choice_info):
         super().update_using_last_choice(last_choice, extra_choice_info)

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from seq2struct.utils import registry
+from seq2struct.models import transformer
 
 
 def maybe_mask(attn, attn_mask):
@@ -92,3 +93,47 @@ class BahdanauPointer(torch.nn.Module):
 class BahdanauAttention(Attention):
     def __init__(self, query_size, value_size, proj_size):
         super().__init__(BahdanauPointer(query_size, value_size, proj_size))
+
+
+# Adapted from The Annotated Transformers
+class MultiHeadedAttention(torch.nn.Module):
+    def __init__(self, h, query_size, value_size, dropout=0.1):
+        super().__init__()
+        assert query_size % h == 0
+        assert value_size % h == 0
+
+        # We assume d_v always equals d_k
+        self.d_k = value_size // h
+        self.h = h
+
+        self.linears = torch.nn.ModuleList([
+            torch.nn.Linear(query_size, value_size),
+            torch.nn.Linear(value_size, value_size),
+            torch.nn.Linear(value_size, value_size),
+            torch.nn.Linear(value_size, value_size),
+        ])
+
+        self.attn = None
+        self.dropout = torch.nn.Dropout(p=dropout)
+        
+    def forward(self, query, values, attn_mask=None):
+        "Implements Figure 2"
+        if attn_mask is not None:
+            # Same mask applied to all h heads.
+            attn_mask = attn_mask.unsqueeze(1)
+        nbatches = query.size(0)
+        
+        # 1) Do all the linear projections in batch from d_model => h x d_k 
+        query, keys, values = \
+            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+             for l, x in zip(self.linears, (query, values, values))]
+        
+        # 2) Apply attention on all the projected vectors in batch. 
+        x, self.attn = transformer.attention(
+                query, keys, values, mask=attn_mask, dropout=self.dropout)
+        
+        # 3) "Concat" using a view and apply a final linear. 
+        x = x.transpose(1, 2).contiguous() \
+             .view(nbatches, -1, self.h * self.d_k)
+        x = x.squeeze(1)
+        return self.linears[-1](x), self.attn

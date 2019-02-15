@@ -21,6 +21,7 @@ class SpiderEncoderState:
     words = attr.ib()
 
     pointer_memories = attr.ib()
+    pointer_maps = attr.ib()
 
     def find_word_occurrences(self, word):
         return [i for i, w in enumerate(self.words) if w == word]
@@ -181,7 +182,8 @@ class SpiderEncoder(torch.nn.Module):
             words=desc['question'],
             pointer_memories={
                 'column': columns_outputs,
-                'table': self._table_enc(desc, columns_outputs)})
+                'table': self._table_enc(desc, columns_outputs)},
+            pointer_maps={})
     
     def _embed_words_learned(self, tokens):
         # token_indices shape: batch (=1) x length
@@ -251,21 +253,23 @@ class SpiderEncoderV2(torch.nn.Module):
             table_names = []
             table_bounds = []
             column_to_table = {}
+            table_to_columns = {i: [] for i in range(len(item.schema.tables))}
             foreign_keys = {}
             foreign_keys_tables = collections.defaultdict(set)
 
             # TODO: things in brackets won't work with fixed embeddings
             last_table_id = None
             for i, column in enumerate(item.schema.columns):
-                table_name = ['<any-table>'] if column.table is None else column.table.name
-
                 column_name = ['<type: {}>'.format(column.type)] + column.name
                 if self.include_table_name_in_column:
+                    table_name = ['<any-table>'] if column.table is None else column.table.name
                     column_name += ['<table-sep>'] + table_name
                 column_names.append(column_name)
 
                 table_id = None if column.table is None else column.table.id
                 column_to_table[i] = table_id
+                if table_id is not None:
+                    table_to_columns[table_id].append(i)
                 if last_table_id != table_id:
                     table_bounds.append(i)
                     last_table_id = table_id
@@ -282,10 +286,11 @@ class SpiderEncoderV2(torch.nn.Module):
 
             return {
                 'question': item.text,
-                'columns': col8umn_names,
+                'columns': column_names,
                 'tables': table_names,
                 'table_bounds': table_bounds,
                 'column_to_table': column_to_table,
+                'table_to_columns': table_to_columns,
                 'foreign_keys': foreign_keys,
                 'foreign_keys_tables': serialization.to_dict_with_sorted_values(foreign_keys_tables),
                 'primary_keys': [
@@ -339,8 +344,16 @@ class SpiderEncoderV2(torch.nn.Module):
         self.question_encoder = self._build_modules(question_encoder)
         self.column_encoder = self._build_modules(column_encoder)
         self.table_encoder = self._build_modules(table_encoder)
-        self.encs_update = registry.instantiate(
+
+        update_modules = {
+            'relational_transformer': 
             spider_enc_modules.RelationalTransformerUpdate,
+            'none':
+            spider_enc_modules.NoOpUpdate,
+        }
+
+        self.encs_update = registry.instantiate(
+            update_modules[update_config['name']],
             update_config,
             device=self._device,
             hidden_size=recurrent_size,
@@ -384,6 +397,10 @@ class SpiderEncoderV2(torch.nn.Module):
         # - Summarize each column into one?
         # c_enc: sum of column lens x batch (=1) x recurrent_size
         c_enc, c_boundaries = self.column_encoder(desc['columns'])
+        column_pointer_maps = {
+            i: list(range(left, right))
+            for i, (left, right) in enumerate(zip(c_boundaries, c_boundaries[1:]))
+        }
 
         # Encode the tables
         # - LookupEmbeddings
@@ -391,6 +408,15 @@ class SpiderEncoderV2(torch.nn.Module):
         # - Summarize each table into one?
         # t_enc: sum of table lens x batch (=1) x recurrent_size
         t_enc, t_boundaries = self.table_encoder(desc['tables'])
+        c_enc_length = c_enc.shape[0]
+        table_pointer_maps = {
+            i: [
+                idx 
+                for col in desc['table_to_columns'][str(i)]
+                for idx in column_pointer_maps[col]
+            ] +  list(range(left + c_enc_length, right + c_enc_length))
+            for i, (left, right) in enumerate(zip(t_boundaries, t_boundaries[1:]))
+        }
 
         # Update each other using self-attention
         # q_enc_new, c_enc_new, and t_enc_new now have shape
@@ -410,9 +436,14 @@ class SpiderEncoderV2(torch.nn.Module):
         return SpiderEncoderState(
             state=None,
             memory=memory,
+            # TODO: words should match memory
             words=desc['question'],
             pointer_memories={
                 'column': c_enc_new,
-                'table': t_enc_new,
+                'table': torch.cat((c_enc_new, t_enc_new), dim=1),
             },
+            pointer_maps={
+                'column': column_pointer_maps,
+                'table': table_pointer_maps,
+            }
         )
