@@ -71,6 +71,11 @@ class SpiderLanguage:
             self.ast_wrapper.singular_types['Table'].fields[0].type = 'int'
         if not include_literals:
             sql_fields = self.ast_wrapper.singular_types['sql'].fields
+            for field in sql_fields:
+                if field.name == 'limit':
+                    field.opt = False
+                    field.type = 'singleton'
+
             assert sql_fields[6].name == 'limit'
             sql_fields[6].opt = False
             sql_fields[6].type = 'singleton'

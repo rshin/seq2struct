@@ -24,7 +24,7 @@ class WarmupPolynomialLRScheduler:
             new_lr = self.start_lr * warmup_frac_done
         else:
             new_lr = (
-                (self.start_lr - self.end_lr) * (1 - (current_step - num_warmup_steps) / self.decay_steps) ** self.power
+                (self.start_lr - self.end_lr) * (1 - (current_step - self.num_warmup_steps) / self.decay_steps) ** self.power
                 + self.end_lr)
 
         for param_group in self.optimizer.param_groups:
