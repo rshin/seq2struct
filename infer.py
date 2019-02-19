@@ -2,6 +2,7 @@ import argparse
 import ast
 import itertools
 import json
+import os
 
 import _jsonnet
 import asdl
@@ -40,6 +41,12 @@ def main():
         config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
     else:
         config = json.loads(_jsonnet.evaluate_file(args.config))
+
+    if 'model_name' in config:
+        args.logdir = os.path.join(args.logdir, config['model_name'])
+    if os.path.exists(args.output):
+        print('Output file {} already exists'.format(args.output))
+        return
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(

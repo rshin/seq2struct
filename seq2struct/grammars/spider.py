@@ -76,10 +76,6 @@ class SpiderLanguage:
                     field.opt = False
                     field.type = 'singleton'
 
-            assert sql_fields[6].name == 'limit'
-            sql_fields[6].opt = False
-            sql_fields[6].type = 'singleton'
-
     def parse(self, code, section):
         return self.parse_sql(code)
 

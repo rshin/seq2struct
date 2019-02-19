@@ -48,11 +48,13 @@ function(args) {
             tables_paths: [
               PREFIX + 'tables.json',
             ],
+            db_path: PREFIX + 'database',
         },
         val: {
             name: 'spider', 
             paths: [PREFIX + 'dev.json'],
             tables_paths: [PREFIX + 'tables.json'],
+            db_path: PREFIX + 'database',
         },
     },
 

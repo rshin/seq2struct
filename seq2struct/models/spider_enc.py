@@ -253,7 +253,7 @@ class SpiderEncoderV2(torch.nn.Module):
             table_names = []
             table_bounds = []
             column_to_table = {}
-            table_to_columns = {i: [] for i in range(len(item.schema.tables))}
+            table_to_columns = {str(i): [] for i in range(len(item.schema.tables))}
             foreign_keys = {}
             foreign_keys_tables = collections.defaultdict(set)
 
@@ -267,16 +267,16 @@ class SpiderEncoderV2(torch.nn.Module):
                 column_names.append(column_name)
 
                 table_id = None if column.table is None else column.table.id
-                column_to_table[i] = table_id
+                column_to_table[str(i)] = table_id
                 if table_id is not None:
-                    table_to_columns[table_id].append(i)
+                    table_to_columns[str(table_id)].append(i)
                 if last_table_id != table_id:
                     table_bounds.append(i)
                     last_table_id = table_id
 
                 if column.foreign_key_for is not None:
-                    foreign_keys[column.id] = column.foreign_key_for.id
-                    foreign_keys_tables[column.table.id].add(column.foreign_key_for.table.id)
+                    foreign_keys[str(column.id)] = column.foreign_key_for.id
+                    foreign_keys_tables[str(column.table.id)].add(column.foreign_key_for.table.id)
 
             table_bounds.append(len(item.schema.columns))
             assert len(table_bounds) == len(item.schema.tables) + 1

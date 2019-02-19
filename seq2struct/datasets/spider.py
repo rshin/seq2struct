@@ -42,17 +42,17 @@ class Schema:
     tables = attr.ib()
     columns = attr.ib()
     foreign_key_graph = attr.ib()
+    orig = attr.ib()
 
 
 @registry.register('dataset', 'spider')
 class SpiderDataset(torch.utils.data.Dataset): 
-    def __init__(self, paths, tables_paths, limit=None):
+    def __init__(self, paths, tables_paths, db_path, limit=None):
         self.paths = paths
+        self.db_path = db_path
         self.examples = []
         self.schemas = {}
         self.eval_foreign_key_maps = {}
-
-        schema_dicts_by_db = {}
 
         for path in tables_paths:
             schema_dicts  = json.load(open(path))
@@ -103,9 +103,8 @@ class SpiderDataset(torch.utils.data.Dataset):
 
                 db_id = schema_dict['db_id']
                 assert db_id not in self.schemas
-                self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph)
+                self.schemas[db_id] = Schema(db_id, tables, columns, foreign_key_graph, schema_dict)
                 self.eval_foreign_key_maps[db_id] = evaluation.build_foreign_key_map(schema_dict)
-                schema_dicts_by_db[db_id] = schema_dict
 
         for path in paths:
             raw_data = json.load(open(path))
@@ -115,7 +114,7 @@ class SpiderDataset(torch.utils.data.Dataset):
                     code=entry['sql'],
                     schema=self.schemas[entry['db_id']],
                     orig=entry,
-                    orig_schema=schema_dicts_by_db[entry['db_id']])
+                    orig_schema=self.schemas[entry['db_id']].orig)
                 self.examples.append(item)
 
     def __len__(self):
@@ -124,9 +123,26 @@ class SpiderDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         return self.examples[idx]
 
-    @attr.s
     class Metrics:
-        dataset = attr.ib()
+        def __init__(self, dataset):
+          self.dataset = dataset
+          self.foreign_key_maps = {
+              db_id: evaluation.build_foreign_key_map(schema.orig)
+              for db_id, schema in self.dataset.schemas.items()
+          }
+          self.evaluator = evaluation.Evaluator(
+              self.dataset.db_path,
+              self.foreign_key_maps,
+              'match')
+          self.results = []
 
         def add(self, item, inferred_code):
-            pass
+            self.results.append(self.evaluator.evaluate_one(
+                item.schema.db_id, item.orig['query'], inferred_code))
+
+        def finalize(self):
+            self.evaluator.finalize()
+            return {
+                'per_item': self.results,
+                'total_scores': self.evaluator.scores
+            }

@@ -1243,7 +1243,7 @@ class InferenceTreeTraversal(TreeTraversal):
     def pointer_choice(self, node_type, logits):
         # Group them based on pointer map
         pointer_logprobs = self.model.pointer_infer(node_type, logits)
-        pointer_map = self.desc_enc.pointer_map.get(node_type)
+        pointer_map = self.desc_enc.pointer_maps.get(node_type)
         if not pointer_map:
             return pointer_logprobs
 
@@ -1254,7 +1254,7 @@ class InferenceTreeTraversal(TreeTraversal):
                     tuple(pointer_logprobs[i] for i in mapped_indices),
                     dim=0),
                 dim=0))
-            for orig_index, mapped_indices in pointer_map
+            for orig_index, mapped_indices in pointer_map.items()
         ]
 
     def update_using_last_choice(self, last_choice, extra_choice_info):
