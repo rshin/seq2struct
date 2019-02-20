@@ -10,6 +10,9 @@ from seq2struct.models import transformer
 from seq2struct.utils import batched_sequence
 
 
+BATCH_DEBUG = False
+
+
 def clamp(value, abs_max):
     value = max(-abs_max, value)
     value = min(abs_max, value)
@@ -18,15 +21,20 @@ def clamp(value, abs_max):
 
 def get_attn_mask(seq_lengths):
     # Given seq_lengths like [3, 1, 2], this will produce
-    # [[1, 1, 1],
-    #  [1, 0, 0],
-    #  [1, 1, 0]]
+    # [[[1, 1, 1],
+    #   [1, 1, 1],
+    #   [1, 1, 1]],
+    #  [[1, 0, 0],
+    #   [0, 0, 0],
+    #   [0, 0, 0]],
+    #  [[1, 1, 0],
+    #   [1, 1, 0],
+    #   [0, 0, 0]]]
     # int(max(...)) so that it has type 'int instead of numpy.int64
     max_length, batch_size = int(max(seq_lengths)), len(seq_lengths)
-    ranges = torch.arange(
-        0, max_length,
-        out=torch.LongTensor()).unsqueeze(0).expand(batch_size, -1)
-    attn_mask = (ranges < torch.LongTensor(seq_lengths).unsqueeze(1))
+    attn_mask = torch.LongTensor(batch_size, max_length, max_length).fill_(0)
+    for batch_idx, seq_length in enumerate(seq_lengths):
+      attn_mask[batch_idx, :seq_length, :seq_length] = 1
     return attn_mask
 
 
@@ -60,6 +68,8 @@ class LookupEmbeddings(torch.nn.Module):
             tensor_type=torch.LongTensor,
             item_to_tensor=lambda token, batch_idx, out: out.fill_(self.vocab.index(token))
         )
+        indices = indices.apply(lambda d: d.to(self._device))
+
         # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
         all_embs = indices.apply(lambda x: self.embedding(x.squeeze(-1)))
 
@@ -287,8 +297,19 @@ class RelationalTransformerUpdate(torch.nn.Module):
             num_layers)
     
     def forward(self, descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
+        if BATCH_DEBUG:
+            q_enc0 = q_enc.select_subseq([0])
+            c_enc0 = c_enc.select_subseq([0])
+            t_enc0 = t_enc.select_subseq([0])
+            assert torch.allclose(q_enc.select(0), q_enc0.select(0))
+            assert torch.allclose(c_enc.select(0), c_enc0.select(0))
+            assert torch.allclose(t_enc.select(0), t_enc0.select(0))
+
         # enc: PackedSequencePlus with shape [batch, total len, recurrent size]
         enc = batched_sequence.PackedSequencePlus.cat_seqs((q_enc, c_enc, t_enc))
+        if BATCH_DEBUG:
+            enc0 = batched_sequence.PackedSequencePlus.cat_seqs((q_enc0, c_enc0, t_enc0))
+            assert torch.allclose(enc.select(0), enc0.select(0))
 
         q_enc_lengths = list(q_enc.orig_lengths())
         c_enc_lengths = list(c_enc.orig_lengths())
@@ -309,9 +330,8 @@ class RelationalTransformerUpdate(torch.nn.Module):
             all_relations.append(np.pad(relations_for_item, ((0, max_enc_length - enc_length),), 'constant'))
         relations_t = torch.from_numpy(np.stack(all_relations)).to(self._device)
 
-        # mask shape: [batch, total len, 1]
-        # the last dimension will get broadcasted
-        mask = get_attn_mask(enc_lengths).unsqueeze(-1).to(self._device)
+        # mask shape: [batch, total len, total len]
+        mask = get_attn_mask(enc_lengths).to(self._device)
         # enc_new: shape [batch, total len, recurrent size]
         enc_padded, _ = enc.pad(batch_first=True)
         enc_new = self.encoder(enc_padded, relations_t, mask=mask) 

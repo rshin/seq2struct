@@ -84,6 +84,7 @@ def main():
     parser.add_argument('--logdir', required=True)
     parser.add_argument('--config', required=True)
     parser.add_argument('--config-args')
+    parser.add_argument('--step', type=int)
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -122,7 +123,7 @@ def main():
     # 2. Restore its parameters
     saver = saver_mod.Saver(
         model, optimizer, keep_every_n=train_config.keep_every_n)
-    last_step = saver.restore(args.logdir)
+    last_step = saver.restore(args.logdir, step=args.step)
 
     # 3. Get training data somewhere
     train_data = model_preproc.dataset('train')
