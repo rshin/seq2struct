@@ -358,6 +358,8 @@ class SpiderEncoderV2(torch.nn.Module):
             device=self._device,
             hidden_size=recurrent_size,
             )
+        
+        self.batched = True
 
     def _build_modules(self, module_types):
         module_builder = {
@@ -383,67 +385,79 @@ class SpiderEncoderV2(torch.nn.Module):
         return torch.nn.Sequential(*modules)
 
 
-    def forward(self, desc):
+    def forward(self, descs):
         # Encode the question
         # - LookupEmbeddings
         # - Transform embeddings wrt each other?
 
-        # q_enc: question len x batch (=1) x recurrent_size
-        q_enc, (_, _) = self.question_encoder([desc['question']])
+        # q_enc: PackedSequencePlus, [batch, question len, recurrent_size]
+        q_enc, _ = self.question_encoder([[desc['question']] for desc in descs])
 
         # Encode the columns
         # - LookupEmbeddings
         # - Transform embeddings wrt each other?
         # - Summarize each column into one?
-        # c_enc: sum of column lens x batch (=1) x recurrent_size
-        c_enc, c_boundaries = self.column_encoder(desc['columns'])
-        column_pointer_maps = {
-            i: list(range(left, right))
-            for i, (left, right) in enumerate(zip(c_boundaries, c_boundaries[1:]))
-        }
+        # c_enc: PackedSequencePlus, [batch, sum of column lens, recurrent_size]
+        c_enc, c_boundaries = self.column_encoder([desc['columns'] for desc in descs])
+        column_pointer_maps = [
+            {
+                i: list(range(left, right))
+                for i, (left, right) in enumerate(zip(c_boundaries_for_item, c_boundaries_for_item[1:]))
+            }
+            for batch_idx, c_boundaries_for_item in enumerate(c_boundaries)
+        ]
 
         # Encode the tables
         # - LookupEmbeddings
         # - Transform embeddings wrt each other?
         # - Summarize each table into one?
-        # t_enc: sum of table lens x batch (=1) x recurrent_size
-        t_enc, t_boundaries = self.table_encoder(desc['tables'])
-        c_enc_length = c_enc.shape[0]
-        table_pointer_maps = {
-            i: [
-                idx 
-                for col in desc['table_to_columns'][str(i)]
-                for idx in column_pointer_maps[col]
-            ] +  list(range(left + c_enc_length, right + c_enc_length))
-            for i, (left, right) in enumerate(zip(t_boundaries, t_boundaries[1:]))
-        }
+        # t_enc: PackedSequencePlus, [batch, sum of table lens, recurrent_size]
+        t_enc, t_boundaries = self.table_encoder([desc['tables'] for desc in descs])
+        c_enc_lengths = list(c_enc.orig_lengths())
+        table_pointer_maps = [
+            {
+                i: [
+                    idx 
+                    for col in desc['table_to_columns'][str(i)]
+                    for idx in column_pointer_maps[batch_idx][col]
+                ] +  list(range(left + c_enc_lengths[batch_idx], right + c_enc_lengths[batch_idx]))
+                for i, (left, right) in enumerate(zip(t_boundaries_for_item, t_boundaries_for_item[1:]))
+            }
+            for batch_idx, (desc, t_boundaries_for_item) in enumerate(zip(descs, t_boundaries))
+        ]
 
         # Update each other using self-attention
-        # q_enc_new, c_enc_new, and t_enc_new now have shape
+        # q_enc_new, c_enc_new, and t_enc_new are PackedSequencePlus with shape
         # batch (=1) x length x recurrent_size
         q_enc_new, c_enc_new, t_enc_new = self.encs_update(
-                desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
+                descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
         
-        memory = []
-        if 'question' in self.include_in_memory:
-            memory.append(q_enc_new)
-        if 'column' in self.include_in_memory:
-            memory.append(c_enc_new)
-        if 'table' in self.include_in_memory:
-            memory.append(t_enc_new)
-        memory = torch.cat(memory, dim=1)
+        result = []
+        for batch_idx, desc in enumerate(descs):
+            c_enc_new_item = c_enc_new.select(batch_idx).unsqueeze(0)
+            t_enc_new_item = t_enc_new.select(batch_idx).unsqueeze(0)
 
-        return SpiderEncoderState(
-            state=None,
-            memory=memory,
-            # TODO: words should match memory
-            words=desc['question'],
-            pointer_memories={
-                'column': c_enc_new,
-                'table': torch.cat((c_enc_new, t_enc_new), dim=1),
-            },
-            pointer_maps={
-                'column': column_pointer_maps,
-                'table': table_pointer_maps,
-            }
-        )
+            memory = []
+            if 'question' in self.include_in_memory:
+                memory.append(q_enc_new.select(batch_idx).unsqueeze(0))
+            if 'column' in self.include_in_memory:
+                memory.append(c_enc_new_item)
+            if 'table' in self.include_in_memory:
+                memory.append(t_enc_new_item)
+            memory = torch.cat(memory, dim=1)
+
+            result.append(SpiderEncoderState(
+                state=None,
+                memory=memory,
+                # TODO: words should match memory
+                words=desc['question'],
+                pointer_memories={
+                    'column': c_enc_new_item,
+                    'table': torch.cat((c_enc_new_item, t_enc_new_item), dim=1),
+                },
+                pointer_maps={
+                    'column': column_pointer_maps[batch_idx],
+                    'table': table_pointer_maps[batch_idx],
+                }
+            ))
+        return result

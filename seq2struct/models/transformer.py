@@ -149,7 +149,7 @@ def attention_with_relations(query, key, value, relation_k, relation_v, mask=Non
     d_k = query.size(-1)
     scores = relative_attention_logits(query, key, relation_k)
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
+        scores = scores.masked_fill(mask == 0, -float('inf'))
     p_attn = F.softmax(scores, dim = -1)
     if dropout is not None:
         p_attn = dropout(p_attn)
