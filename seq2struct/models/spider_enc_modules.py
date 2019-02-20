@@ -98,7 +98,7 @@ class BiLSTM(torch.nn.Module):
         desc_lengths = []
         batch_desc_to_flat_map = {}
         for batch_idx, boundaries_for_item in enumerate(boundaries):
-            for desc_idx, (left, right) in enumerate(zip(bounaries_for_item, boundaries_for_item[1:])):
+            for desc_idx, (left, right) in enumerate(zip(boundaries_for_item, boundaries_for_item[1:])):
                 desc_lengths.append((batch_idx, desc_idx, right - left))
                 batch_desc_to_flat_map[batch_idx, desc_idx] = len(batch_desc_to_flat_map)
         
@@ -151,7 +151,7 @@ class BiLSTM(torch.nn.Module):
         # state shape:
         # - h: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
         # - c: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
-        output, (h, c) = self.lstm(rearranged_all_embs)
+        output, (h, c) = self.lstm(rearranged_all_embs.ps)
         if self.summarize:
             # h shape: [batch * num descs, output_size]
             h = torch.cat((h[0], h[1]), dim=-1)
@@ -168,7 +168,7 @@ class BiLSTM(torch.nn.Module):
             ]
         else:
             new_all_embs = all_embs.apply(
-                lambda _: output.ps.data[torch.LongTensor(rev_remapped_ps_indices)])
+                lambda _: output.data[torch.LongTensor(rev_remapped_ps_indices)])
             new_boundaries = boundaries
         
         return new_all_embs, new_boundaries
