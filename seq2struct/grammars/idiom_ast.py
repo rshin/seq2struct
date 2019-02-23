@@ -149,6 +149,22 @@ class IdiomAstGrammar:
             for field in constructor_or_product.fields:
                 if field.type in types_to_replace:
                     field.type = types_to_replace[field.type]
+        
+        self.templates_containing_placeholders = {}
+        for name, constructor in self.ast_wrapper.singular_types.items():
+            if not hasattr(constructor, 'template'):
+                continue
+            hole_values = {}
+            for field in constructor.fields:
+                hole_id = self.get_hole_id(field.name)
+                placeholder = ast_util.HoleValuePlaceholder(id=hole_id, is_seq=field.seq, is_opt=field.opt)
+                if field.seq:
+                    hole_values[hole_id] = [placeholder]
+                else:
+                    hole_values[hole_id] = placeholder
+
+            self.templates_containing_placeholders[name] = constructor.template(hole_values)
+
 
     def parse(self, code, section):
         if self.all_sections_rewritten or section == 'train':
@@ -168,6 +184,13 @@ class IdiomAstGrammar:
     #
     #
 
+    @classmethod
+    def get_hole_id(cls, field):
+        m = re.match('^hole(\d+)$', field)
+        if not m:
+            raise ValueError('Unexpected field name: {}'.format(field))
+        return int(m.group(1))
+
     def _expand_templates(self, tree):
         if not isinstance(tree, dict):
             return tree
@@ -184,6 +207,7 @@ class IdiomAstGrammar:
                 for item in value:
                     converted = self._expand_templates(item)
                     if isinstance(item, dict) and re.match('^Template\d+_.*_seq$', item['_type']):
+                        # TODO: Handle seq fragment fields here
                         item_type_info = self.ast_wrapper.constructors[converted['_type']]
 
                         assert len(item_type_info.fields) == 1
@@ -201,10 +225,7 @@ class IdiomAstGrammar:
         template = constructor.template
         hole_values = {}
         for field, expanded_value in expanded_fields.items():
-            m = re.match('^hole(\d+)$', field)
-            if not m:
-                raise ValueError('Unexpected field name: {}'.format(field))
-            hole_id = int(m.group(1))
+            hole_id = self.get_hole_id(field)
 
             # Do something special if we have a seq fragment
             hole_values[hole_id] = expanded_value
