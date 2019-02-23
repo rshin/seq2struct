@@ -760,6 +760,7 @@ class TreeTraversal:
 
     @attr.s(frozen=True)
     class QueueItem:
+        item_id = attr.ib()
         state = attr.ib()
         node_type = attr.ib()
         parent_action_emb = attr.ib()
@@ -784,6 +785,10 @@ class TreeTraversal:
     class PrevActionTypes(enum.Enum):
         APPLY_RULE = 0
         GEN_TOKEN = 1
+
+    @attr.s
+    class InHole:
+        item_id_to_finish = attr.ib()
     
     def __init__(self, model, desc_enc):
         if model is None:
@@ -803,12 +808,16 @@ class TreeTraversal:
             initial_state = TreeTraversal.State.CHILDREN_INQUIRE
 
         self.queue = pyrsistent.pvector()
+        self.hole_state = TreeTraversal.NotInHole()
+        self.template_queue = pyrsistent.pdeque()
         self.cur_item = TreeTraversal.QueueItem(
+                item_id=0
                 state=initial_state,
                 node_type=root_type,
                 parent_action_emb=self.model.zero_rule_emb,
                 parent_h=self.model.zero_recurrent_emb,
                 parent_field_name=None)
+        self.next_item_id = 1
 
         self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
 
@@ -819,6 +828,9 @@ class TreeTraversal:
         other.recurrent_state = self.recurrent_state
         other.prev_action_emb = self.prev_action_emb
         other.queue = self.queue
+        other.hole_state = self.hole_state
+        other.next_item_id = self.next_item_id
+        other.template_queue = self.template_queue
         other.cur_item = self.cur_item
         other.actions = self.actions
         other.update_prev_action_emb = self.update_prev_action_emb
@@ -837,8 +849,23 @@ class TreeTraversal:
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
         while True:
+            if self.template_queue:
+                next_template_item = self.template_queue[0]
+                self.template_queue = self.template_queue.popleft()
+                # check if there are any choices from the template which we need to step through
+                if isinstance(next_template_item, list) and isinstance(self.hole_state, TreeTraversal.NotInHole):
+                    for choice in next_template_item:
+                        self.step(choice)
+                    continue
+                elif isinstance(next_template_item, ast_util.HoleValuePlaceholder):
+                    # We need to start asking what to do at this hole until we finish its content,
+                     # i.e. when self.cur_item is finished
+                    self.hole_state = TreeTraversal.InHole(self.cur_item.item_id)
+                    continue
+
             self.update_using_last_choice(last_choice, extra_choice_info)
 
+            # TODO: Replace this switch with overridden methods.
             # 1. ApplyRule, like expr -> Call
             if self.cur_item.state == SUM_TYPE_INQUIRE:
                 # a. Ask which one to choose
@@ -862,12 +889,21 @@ class TreeTraversal:
                 sum_type, singular_type = self.model.preproc.all_rules[last_choice]
                 assert sum_type == self.cur_item.node_type
 
+                template_with_placeholders = self.model.grammar.templates_containing_placeholders.get(singular_type)
+                if template_with_placeholders:
+                    template_traversal = TemplateTreeTraversal(self.model, self.desc_enc)
+                    template_traversal.traverse_tree(template_with_placeholders)
+                    # extendleft adds in reverse order
+                    # i.e. [].extendleft([3, 2, 1]) = [1, 2, 3]
+                    self.template_queue = self.template_queue.extendleft(reversed(template_traversal.steps))
+                    continue
+
                 self.cur_item = attr.evolve(
                         self.cur_item,
                         node_type=singular_type,
                         parent_action_emb=self.prev_action_emb,
                         state=CHILDREN_INQUIRE)
-
+                
                 last_choice = None
                 continue
 
@@ -876,7 +912,7 @@ class TreeTraversal:
                 # Check if we have no children
                 type_info = self.model.ast_wrapper.singular_types[self.cur_item.node_type]
                 if not type_info.fields:
-                    if self.pop():
+                    if self.pop(check_hole_finished=True):
                         last_choice = None
                         continue
                     else:
@@ -904,6 +940,7 @@ class TreeTraversal:
                 assert node_type == self.cur_item.node_type
 
                 self.queue = self.queue.append(TreeTraversal.QueueItem(
+                    item_id=self.cur_item.item_id,
                     state=NODE_FINISHED,
                     node_type=None,
                     parent_action_emb=None,
@@ -939,14 +976,16 @@ class TreeTraversal:
                         raise ValueError('Unable to handle field type {}'.format(field_type))
 
                     self.queue = self.queue.append(TreeTraversal.QueueItem(
+                        item_id=self.next_item_id,
                         state=child_state,
                         node_type=child_type,
                         parent_action_emb=self.prev_action_emb,
                         parent_h=self.cur_item.parent_h,
                         parent_field_name=field_info.name,
                     ))
+                    self.next_item_id += 1
                 
-                advanced = self.pop()
+                advanced = self.pop(check_hole_finished=False)
                 assert advanced
                 last_choice = None
                 continue
@@ -991,21 +1030,23 @@ class TreeTraversal:
 
                 for i in range(num_children):
                     self.queue = self.queue.append(TreeTraversal.QueueItem(
+                        item_id=self.next_item_id,
                         state=child_state,
                         node_type=child_node_type,
                         parent_action_emb=self.prev_action_emb,
                         parent_h=self.cur_item.parent_h,
                         parent_field_name=self.cur_item.parent_field_name,
                     ))
+                    self.next_item_id += 1
 
-                advanced = self.pop()
+                advanced = self.pop(check_hole_finished=False)
                 assert advanced
                 last_choice = None
                 continue
 
             elif self.cur_item.state == GEN_TOKEN:
                 if last_choice == vocab.EOS:
-                    if self.pop():
+                    if self.pop(check_hole_finished=True):
                         last_choice = None
                         continue
                     else:
@@ -1039,14 +1080,14 @@ class TreeTraversal:
                 return self.pointer_choice(self.cur_item.node_type, logits)
             
             elif self.cur_item.state == POINTER_APPLY:
-                if self.pop():
+                if self.pop(check_hole_finished=True):
                     last_choice = None
                     continue
                 else:
                     return None
 
             elif self.cur_item.state == NODE_FINISHED:
-                if self.pop():
+                if self.pop(check_hole_finished=True):
                     last_choice = None
                     continue
                 else:
@@ -1055,6 +1096,127 @@ class TreeTraversal:
             else:
                 raise ValueError('Unknown state {}'.format(self.cur_item.state))
     
+    # TODO reduce duplication with compute_loss
+    def traverse_tree(self, tree, parent_field_type=None):
+        queue = [
+            TreeState(
+                node=tree,
+                parent_field_type=parent_field_type,
+            )
+        ]
+        while queue:
+            item = queue.pop()
+            node = item.node
+            parent_field_type = item.parent_field_type
+
+            if isinstance(node, (list, tuple)):
+                # TODO: Support HoleValuePlaceholders which can expand to multiple items?
+                node_type = parent_field_type + '*'
+                rule = (node_type, len(node))
+                rule_idx = self.model.rules_index[rule]
+                assert self.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY
+                self.step(rule_idx)
+
+                if self.model.preproc.use_seq_elem_rules and parent_field_type in self.model.ast_wrapper.sum_types:
+                    parent_field_type += '_seq_elem'
+
+                for i, elem in reversed(list(enumerate(node))):
+                    queue.append(
+                        TreeState(
+                            node=elem,
+                            parent_field_type=parent_field_type,
+                        ))
+                continue
+            
+            if isinstance(node, ast_util.HoleValuePlaceholder):
+                self.step(node)
+                continue
+
+            if parent_field_type in self.model.preproc.grammar.pointers:
+                assert isinstance(node, int)
+                # TODO: Put back the following line
+                #assert self.cur_item.state == TreeTraversal.State.POINTER_APPLY
+                self.step(node)
+                continue
+
+            if parent_field_type in self.model.ast_wrapper.primitive_types:
+                # identifier, int, string, bytes, object, singleton
+                # - could be bytes, str, int, float, bool, NoneType
+                # - terminal tokens vocabulary is created by turning everything into a string (with `str`)
+                # - at decoding time, cast back to str/int/float/bool
+                field_type = type(node).__name__
+                field_value_split = self.model.preproc.grammar.tokenize_field_value(node) + [
+                        vocab.EOS]
+
+                for token in field_value_split:
+                    # TODO: Put back the following line
+                    #assert self.cur_item.state == TreeTraversal.State.GEN_TOKEN
+                    self.step(token)
+                continue
+            
+            type_info = self.model.ast_wrapper.singular_types[node['_type']]
+
+            if parent_field_type in self.model.preproc.sum_type_constructors:
+                # ApplyRule, like expr -> Call
+                rule = (parent_field_type, type_info.name)
+                rule_idx = self.model.rules_index[rule]
+                assert self.cur_item.state == TreeTraversal.State.SUM_TYPE_APPLY
+                extra_rules = [
+                    self.model.rules_index[parent_field_type, extra_type]
+                    for extra_type in node.get('_extra_types', [])]
+                self.step(rule_idx, extra_rules)
+
+            if type_info.fields:
+                # ApplyRule, like Call -> expr[func] expr*[args] keyword*[keywords]
+                # Figure out which rule needs to be applied
+                present = get_field_presence_info(self.model.ast_wrapper, node, type_info.fields)
+
+                # Are any of the fields HoleValuePlaceholders?
+                presence_indices = []
+                presence_values = []
+                for i, field_info in enumerate(type_info.fields):
+                    if field_info.name not in node:
+                        continue
+                    field_value = node[field_info.name]
+
+                    if isinstance(field_value, ast_util.HoleValuePlaceholder) or (
+                        isinstance(field_value, list) and
+                        len(field_value) == 1 and
+                        isinstance(field_value[0], ast_util.HoleValuePlaceholder)):
+
+                        # If field is a primitive type, then we need to ask the model what type it is
+                        # If field is optional, it may actually be missing
+                        presence = tuple(set(info[i] for info in self.model.preproc.field_presence_infos[type_info.name]))
+                        presence_indices.append(i)
+                        presence_values.append(presence)
+                
+                if presence_indices:
+                    # TODO: Mask possible presence rules and ask for the best one
+                    assert all(len(pv) == 1 for pv in presence_values)
+
+                rule = (node['_type'], tuple(present))
+                rule_idx = self.model.rules_index[rule]
+                assert self.cur_item.state == TreeTraversal.State.CHILDREN_APPLY
+                self.step(rule_idx)
+
+            # reversed so that we perform a DFS in left-to-right order
+            for field_info in reversed(type_info.fields):
+                if field_info.name not in node:
+                    continue
+
+                queue.append(
+                    TreeState(
+                        node=node[field_info.name],
+                        parent_field_type=field_info.type,
+                    ))
+    
+    def depth_inc(self):
+        self.depth += 1
+    
+    def depth_dec(self):
+        self.depth -= 1
+        assert self.depth >= 0
+
     def update_using_last_choice(self, last_choice, extra_choice_info):
         if last_choice is None:
             return
@@ -1062,6 +1224,12 @@ class TreeTraversal:
     
     @classmethod
     def _update_prev_action_emb_apply_rule(cls, self, last_choice, extra_choice_info):
+        #if self.cur_item.state == SUM_TYPE_APPLY:
+        #    sum_type, singular_type = self.model.preproc.all_rules[last_choice]
+        #    template_with_placeholders = self.model.grammar.templates_containing_placeholders.get(singular_type)
+        #    if template_with_placeholders:
+        #        return
+
         # rule_idx shape: batch (=1)
         rule_idx = self.model._tensor([last_choice])
         # action_emb shape: batch (=1) x emb_size
@@ -1080,11 +1248,15 @@ class TreeTraversal:
         self.prev_action_emb = self.model.pointer_action_emb_proj[self.cur_item.node_type](
                 self.desc_enc.pointer_memories[self.cur_item.node_type][:, last_choice])
 
-    def pop(self):
+    def pop(self, check_hole_finished):
         if self.queue:
-           self.cur_item = self.queue[-1]
-           self.queue = self.queue.delete(-1)
-           return True
+            if (check_hole_finished and 
+                isinstance(self.hole_state, InHole) and 
+                self.hole_state.item_id_to_finish == self.cur_item.item_id):
+                self.hole_state = None
+            self.cur_item = self.queue[-1]
+            self.queue = self.queue.delete(-1)
+            return True
         return False
 
     def rule_choice(self, node_type, rule_logits):
@@ -1361,3 +1533,16 @@ class InferenceTreeTraversal(TreeTraversal):
 
         assert not stack
         return root, self.model.preproc.grammar.unparse(root, self.example)
+
+
+class TemplateTreeTraversal(TreeTraversal):
+    def __init__(self, model, desc_enc):
+        super().__init__(model, desc_enc)
+        self.steps = [[]]
+        self.holes = []
+
+    def step(self, last_choice, extra_choice_info=None):
+        if isinstance(last_choice, ast_util.HoleValuePlaceholder):
+            self.steps += [last_choice, []]
+        else:
+            self.stepse[-1].append(last_choice)
