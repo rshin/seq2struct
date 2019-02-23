@@ -293,7 +293,8 @@ class NL2CodeDecoder(torch.nn.Module):
             recurrent_size=256,
             dropout=0.,
             desc_attn='bahdanau',
-            copy_pointer=None):
+            copy_pointer=None,
+            multi_loss_type='logsumexp'):
         super().__init__()
         self._device = device
         self.preproc = preproc
@@ -366,6 +367,10 @@ class NL2CodeDecoder(torch.nn.Module):
         else:
             # TODO: Figure out how to get right sizes (query, key) to module
             self.copy_pointer = copy_pointer
+        if multi_loss_type == 'logsumexp':
+            self.multi_loss_reduction = lambda logprobs: -torch.logsumexp(logprobs, dim=1)
+        elif multi_loss_type == 'mean':
+            self.multi_loss_reduction = lambda logprobs: -torch.mean(logprobs, dim=1)
         
         self.pointers = torch.nn.ModuleDict()
         self.pointer_action_emb_proj = torch.nn.ModuleDict()
@@ -1107,9 +1112,9 @@ class TrainTreeTraversal(TreeTraversal):
         logits = attr.ib()
         def compute_loss(self, outer, idx, extra_indices):
             if extra_indices:
-                # TODO batching
                 logprobs = torch.nn.functional.log_softmax(self.logits, dim=1)
-                return -torch.logsumexp(logprobs[:, [idx] + extra_indices], dim=1)
+                valid_logprobs = logprobs[:, [idx] + extra_indices]
+                return outer.model.multi_loss_reduction(valid_logprobs)
             else:
                 # idx shape: batch (=1)
                 idx = outer.model._tensor([idx])
