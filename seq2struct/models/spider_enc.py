@@ -14,10 +14,6 @@ from seq2struct.utils import registry
 from seq2struct.utils import vocab
 from seq2struct.utils import serialization
 
-
-BATCH_DEBUG = False
-
-
 @attr.s
 class SpiderEncoderState:
     state = attr.ib()
@@ -396,9 +392,6 @@ class SpiderEncoderV2(torch.nn.Module):
 
         # q_enc: PackedSequencePlus, [batch, question len, recurrent_size]
         q_enc, _ = self.question_encoder([[desc['question']] for desc in descs])
-        if BATCH_DEBUG:
-            q_enc0, _ = self.question_encoder([[descs[0]['question']]])
-            assert torch.allclose(q_enc.select(0), q_enc0.select(0))
 
         # Encode the columns
         # - LookupEmbeddings
@@ -406,10 +399,6 @@ class SpiderEncoderV2(torch.nn.Module):
         # - Summarize each column into one?
         # c_enc: PackedSequencePlus, [batch, sum of column lens, recurrent_size]
         c_enc, c_boundaries = self.column_encoder([desc['columns'] for desc in descs])
-        if BATCH_DEBUG:
-            c_enc0, _ = self.column_encoder([descs[0]['columns']])
-            assert torch.allclose(c_enc.select(0), c_enc0.select(0), rtol=1e-3)
-
         column_pointer_maps = [
             {
                 i: list(range(left, right))
@@ -424,10 +413,6 @@ class SpiderEncoderV2(torch.nn.Module):
         # - Summarize each table into one?
         # t_enc: PackedSequencePlus, [batch, sum of table lens, recurrent_size]
         t_enc, t_boundaries = self.table_encoder([desc['tables'] for desc in descs])
-        if BATCH_DEBUG:
-            t_enc0, _ = self.table_encoder([descs[0]['tables']])
-            assert torch.allclose(t_enc.select(0), t_enc0.select(0), rtol=1e-3)
-
         c_enc_lengths = list(c_enc.orig_lengths())
         table_pointer_maps = [
             {
@@ -446,13 +431,6 @@ class SpiderEncoderV2(torch.nn.Module):
         # batch (=1) x length x recurrent_size
         q_enc_new, c_enc_new, t_enc_new = self.encs_update(
                 descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
-        if BATCH_DEBUG:
-            q_enc_new0, c_enc_new0, t_enc_new0 = self.encs_update(
-                    [descs[0]], q_enc0, c_enc0, [c_boundaries[0]], t_enc0,
-                    [t_boundaries[0]])
-            assert (q_enc_new.select(0) - q_enc_new0.select(0)).abs().max() < 1e-5
-            assert (c_enc_new.select(0) - c_enc_new0.select(0)).abs().max() < 1e-5
-            assert (t_enc_new.select(0) - t_enc_new0.select(0)).abs().max() < 1e-5
         
         result = []
         for batch_idx, desc in enumerate(descs):

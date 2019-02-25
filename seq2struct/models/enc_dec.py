@@ -80,17 +80,6 @@ class EncDecModel(torch.nn.Module):
         else:
             return torch.mean(torch.stack(losses, dim=0), dim=0)
 
-    def _compute_loss_enc_batched2(self, batch, debug=False):
-        losses = []
-        for enc_input, dec_output in batch:
-            enc_state, = self.encoder([enc_input])
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
-            losses.append(loss)
-        if debug:
-            return losses
-        else:
-            return torch.mean(torch.stack(losses, dim=0), dim=0)
-
     def _compute_loss_unbatched(self, batch, debug=False):
         losses = []
         for enc_input, dec_output in batch:

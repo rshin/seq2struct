@@ -57,8 +57,7 @@ def batch_bounds_for_packing(lengths):
 
 
 def _make_packed_sequence(data, batch_sizes):
-    return torch.nn.utils.rnn.PackedSequence(data,
-        torch.LongTensor(batch_sizes).to(data.device))
+    return torch.nn.utils.rnn.PackedSequence(data, torch.LongTensor(batch_sizes))
 
 
 @attr.s(frozen=True)
@@ -107,15 +106,6 @@ class PackedSequencePlus:
             return self.ps.data[
                 self.raw_index(orig_batch_idx, range(self.lengths[self.sort_to_orig[orig_batch_idx]]))]
         return self.ps.data[self.raw_index(orig_batch_idx, seq_idx)]
-      
-    def select_subseq(self, orig_batch_indices):
-        lengths = [self.lengths[self.sort_to_orig[i]] for i in
-          orig_batch_indices]
-        return self.from_gather(
-            lengths=lengths,
-            map_index=self.raw_index,
-            gather_from_indices=lambda indices:
-            self.ps.data[torch.LongTensor(indices)])
 
     def orig_index(self, raw_idx):
         seq_idx = np.searchsorted(
