@@ -191,7 +191,7 @@ class BiLSTM(torch.nn.Module):
             # new_all_embs: PackedSequencePlus, [batch, num descs, input_size]
             new_all_embs = batched_sequence.PackedSequencePlus.from_gather(
                 lengths=[len(boundaries_for_item) - 1 for boundaries_for_item in boundaries],
-                map_index=lambda batch_idx, desc_idx: rearranged_all_embs.orig_to_sort[batch_desc_to_flat_map[batch_idx, desc_idx]],
+                map_index=lambda batch_idx, desc_idx: rearranged_all_embs.sort_to_orig[batch_desc_to_flat_map[batch_idx, desc_idx]],
                 gather_from_indices=lambda indices: h[torch.LongTensor(indices)])
 
             new_boundaries = [
