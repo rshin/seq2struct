@@ -21,6 +21,9 @@ class NL2CodeEncoderState:
 
 @registry.register('encoder', 'NL2Code')
 class NL2CodeEncoder(torch.nn.Module):
+
+    batched = False
+
     class Preproc(abstract_preproc.AbstractPreproc):
         def __init__(
                 self,
