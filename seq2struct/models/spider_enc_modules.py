@@ -1,4 +1,5 @@
 import itertools
+import operator
 
 import numpy as np
 import torch
@@ -6,12 +7,33 @@ from torch import nn
 
 from seq2struct.models import lstm
 from seq2struct.models import transformer
+from seq2struct.utils import batched_sequence
+
 
 
 def clamp(value, abs_max):
     value = max(-abs_max, value)
     value = min(abs_max, value)
     return value
+
+
+def get_attn_mask(seq_lengths):
+    # Given seq_lengths like [3, 1, 2], this will produce
+    # [[[1, 1, 1],
+    #   [1, 1, 1],
+    #   [1, 1, 1]],
+    #  [[1, 0, 0],
+    #   [0, 0, 0],
+    #   [0, 0, 0]],
+    #  [[1, 1, 0],
+    #   [1, 1, 0],
+    #   [0, 0, 0]]]
+    # int(max(...)) so that it has type 'int instead of numpy.int64
+    max_length, batch_size = int(max(seq_lengths)), len(seq_lengths)
+    attn_mask = torch.LongTensor(batch_size, max_length, max_length).fill_(0)
+    for batch_idx, seq_length in enumerate(seq_lengths):
+      attn_mask[batch_idx, :seq_length, :seq_length] = 1
+    return attn_mask
 
 
 class LookupEmbeddings(torch.nn.Module):
@@ -23,7 +45,7 @@ class LookupEmbeddings(torch.nn.Module):
         self.embedding = torch.nn.Embedding(
             num_embeddings=len(self.vocab), embedding_dim=emb_size)
 
-    def forward(self, token_lists):
+    def forward_unbatched(self, token_lists):
         # token_lists: list of list of lists
         # [batch, num descs, desc length]
         # - each list contains tokens
@@ -52,6 +74,38 @@ class LookupEmbeddings(torch.nn.Module):
 
         return all_embs, boundaries
 
+    def forward(self, token_lists):
+        # token_lists: list of list of lists
+        # [batch, num descs, desc length]
+        # - each list contains tokens
+        # - each list corresponds to a column name, table name, etc.
+
+        # PackedSequencePlus, with shape: [batch, num descs * desc length (sum of desc lengths)]
+        indices = batched_sequence.PackedSequencePlus.from_lists(
+            lists=[
+                [
+                    token
+                    for token_list in token_lists_for_item
+                    for token in token_list
+                ]
+                for token_lists_for_item in token_lists
+            ],
+            item_shape=(1,),  # For compatibility with old PyTorch versions
+            tensor_type=torch.LongTensor,
+            item_to_tensor=lambda token, batch_idx, out: out.fill_(self.vocab.index(token))
+        )
+        indices = indices.apply(lambda d: d.to(self._device))
+
+        # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
+        all_embs = indices.apply(lambda x: self.embedding(x.squeeze(-1)))
+
+        # boundaries shape: [batch, num descs + 1]
+        boundaries = [
+            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
+            for token_lists_for_item in token_lists]
+
+        return all_embs, boundaries
+
 
 class BiLSTM(torch.nn.Module):
     def __init__(self, input_size, output_size, dropout, summarize):
@@ -70,7 +124,7 @@ class BiLSTM(torch.nn.Module):
                 dropout=dropout)
         self.summarize = summarize
 
-    def forward(self, input_):
+    def forward_unbatched(self, input_):
         # all_embs shape: sum of desc lengths x batch (=1) x input_size
         all_embs, boundaries = input_
 
@@ -91,6 +145,65 @@ class BiLSTM(torch.nn.Module):
             outputs.append(seq_emb)
 
         return torch.cat(outputs, dim=0), new_boundaries
+
+    def forward(self, input_):
+        # all_embs shape: PackedSequencePlus with shape [batch, sum of desc lengths, input_size]
+        # boundaries: list of lists with shape [batch, num descs + 1]
+        all_embs, boundaries = input_
+
+        # List of the following:
+        # (batch_idx, desc_idx, length)
+        desc_lengths = []
+        batch_desc_to_flat_map = {}
+        for batch_idx, boundaries_for_item in enumerate(boundaries):
+            for desc_idx, (left, right) in enumerate(zip(boundaries_for_item, boundaries_for_item[1:])):
+                desc_lengths.append((batch_idx, desc_idx, right - left))
+                batch_desc_to_flat_map[batch_idx, desc_idx] = len(batch_desc_to_flat_map)
+
+        # Recreate PackedSequencePlus into shape
+        # [batch * num descs, desc length, input_size]
+        # with name `rearranged_all_embs`
+        remapped_ps_indices = []
+        def rearranged_all_embs_map_index(desc_lengths_idx, seq_idx):
+            batch_idx, desc_idx, _ = desc_lengths[desc_lengths_idx]
+            return batch_idx, boundaries[batch_idx][desc_idx] + seq_idx
+        def rearranged_all_embs_gather_from_indices(indices):
+            batch_indices, seq_indices = zip(*indices)
+            remapped_ps_indices[:] =  all_embs.raw_index(batch_indices, seq_indices)
+            return all_embs.ps.data[torch.LongTensor(remapped_ps_indices)]
+        rearranged_all_embs = batched_sequence.PackedSequencePlus.from_gather(
+            lengths=[length for _, _, length in desc_lengths],
+            map_index=rearranged_all_embs_map_index,
+            gather_from_indices=rearranged_all_embs_gather_from_indices)
+        rev_remapped_ps_indices = tuple(
+            x[0] for x in sorted(
+                enumerate(remapped_ps_indices), key=operator.itemgetter(1)))
+
+        # output shape: PackedSequence, [batch * num_descs, desc length, output_size]
+        # state shape:
+        # - h: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
+        # - c: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
+        output, (h, c) = self.lstm(rearranged_all_embs.ps)
+        if self.summarize:
+            # h shape: [batch * num descs, output_size]
+            h = torch.cat((h[0], h[1]), dim=-1)
+
+            # new_all_embs: PackedSequencePlus, [batch, num descs, input_size]
+            new_all_embs = batched_sequence.PackedSequencePlus.from_gather(
+                lengths=[len(boundaries_for_item) - 1 for boundaries_for_item in boundaries],
+                map_index=lambda batch_idx, desc_idx: rearranged_all_embs.orig_to_sort[batch_desc_to_flat_map[batch_idx, desc_idx]],
+                gather_from_indices=lambda indices: h[torch.LongTensor(indices)])
+
+            new_boundaries = [
+                list(range(len(boundaries_for_item)))
+                for boundaries_for_item in boundaries
+            ]
+        else:
+            new_all_embs = all_embs.apply(
+                lambda _: output.data[torch.LongTensor(rev_remapped_ps_indices)])
+            new_boundaries = boundaries
+
+        return new_all_embs, new_boundaries
 
 
 class RelationalTransformerUpdate(torch.nn.Module):
@@ -205,7 +318,7 @@ class RelationalTransformerUpdate(torch.nn.Module):
             hidden_size,
             num_layers)
     
-    def forward(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
+    def forward_unbatched(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
         # enc shape: total len x batch (=1) x recurrent size
         enc = torch.cat((q_enc, c_enc, t_enc), dim=0)
 
@@ -213,22 +326,91 @@ class RelationalTransformerUpdate(torch.nn.Module):
         enc = enc.transpose(0, 1)
 
         # Catalogue which things are where
-        loc_types = {}
-        for i in range(q_enc.shape[0]):
-            loc_types[i] = ('question',)
+        relations = self.compute_relations(
+                desc,
+                enc_length=enc.shape[1],
+                q_enc_length=q_enc.shape[0],
+                c_enc_length=c_enc.shape[0],
+                c_boundaries=c_boundaries,
+                t_boundaries=t_boundaries)
+
+        relations_t = torch.tensor(relations, device=self._device)
+        enc_new = self.encoder(enc, relations_t, mask=None)
+
+        # Split updated_enc again
         c_base = q_enc.shape[0]
+        t_base = q_enc.shape[0] + c_enc.shape[0]
+        q_enc_new = enc_new[:, :c_base]
+        c_enc_new = enc_new[:, c_base:t_base]
+        t_enc_new = enc_new[:, t_base:]
+        return q_enc_new, c_enc_new, t_enc_new
+
+    def forward(self, descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
+        # enc: PackedSequencePlus with shape [batch, total len, recurrent size]
+        enc = batched_sequence.PackedSequencePlus.cat_seqs((q_enc, c_enc, t_enc))
+
+        q_enc_lengths = list(q_enc.orig_lengths())
+        c_enc_lengths = list(c_enc.orig_lengths())
+        t_enc_lengths = list(t_enc.orig_lengths())
+        enc_lengths = list(enc.orig_lengths())
+        max_enc_length = max(enc_lengths)
+
+        all_relations = []
+        for batch_idx, desc in enumerate(descs):
+            enc_length = enc_lengths[batch_idx]
+            relations_for_item = self.compute_relations(
+                desc,
+                enc_length,
+                q_enc_lengths[batch_idx],
+                c_enc_lengths[batch_idx],
+                c_boundaries[batch_idx],
+                t_boundaries[batch_idx])
+            all_relations.append(np.pad(relations_for_item, ((0, max_enc_length - enc_length),), 'constant'))
+        relations_t = torch.from_numpy(np.stack(all_relations)).to(self._device)
+
+        # mask shape: [batch, total len, total len]
+        mask = get_attn_mask(enc_lengths).to(self._device)
+        # enc_new: shape [batch, total len, recurrent size]
+        enc_padded, _ = enc.pad(batch_first=True)
+        enc_new = self.encoder(enc_padded, relations_t, mask=mask)
+
+        # Split enc_new again
+        def gather_from_enc_new(indices):
+            batch_indices, seq_indices = zip(*indices)
+            return enc_new[torch.LongTensor(batch_indices), torch.LongTensor(seq_indices)]
+
+        q_enc_new = batched_sequence.PackedSequencePlus.from_gather(
+            lengths=q_enc_lengths,
+            map_index=lambda batch_idx, seq_idx: (batch_idx, seq_idx),
+            gather_from_indices=gather_from_enc_new)
+        c_enc_new = batched_sequence.PackedSequencePlus.from_gather(
+            lengths=c_enc_lengths,
+            map_index=lambda batch_idx, seq_idx: (batch_idx, q_enc_lengths[batch_idx] + seq_idx),
+            gather_from_indices=gather_from_enc_new)
+        t_enc_new = batched_sequence.PackedSequencePlus.from_gather(
+            lengths=t_enc_lengths,
+            map_index=lambda batch_idx, seq_idx: (batch_idx, q_enc_lengths[batch_idx] + c_enc_lengths[batch_idx] + seq_idx),
+            gather_from_indices=gather_from_enc_new)
+        return q_enc_new, c_enc_new, t_enc_new
+
+    def compute_relations(self, desc, enc_length, q_enc_length, c_enc_length, c_boundaries, t_boundaries):
+        # Catalogue which things are where
+        loc_types = {}
+        for i in range(q_enc_length):
+            loc_types[i] = ('question',)
+
+        c_base = q_enc_length
         for c_id, (c_start, c_end) in enumerate(zip(c_boundaries, c_boundaries[1:])):
             for i in range(c_start + c_base, c_end + c_base):
                 loc_types[i] = ('column', c_id)
-        t_base = q_enc.shape[0] + c_enc.shape[0]
+        t_base = q_enc_length + c_enc_length
         for t_id, (t_start, t_end) in enumerate(zip(t_boundaries, t_boundaries[1:])):
             for i in range(t_start + t_base, t_end + t_base):
                 loc_types[i] = ('table', t_id)
         
-        desc_length = enc.shape[1]
-        relations = np.empty((desc_length, desc_length), dtype=np.int64)
+        relations = np.empty((enc_length, enc_length), dtype=np.int64)
 
-        for i, j in itertools.product(range(desc_length),repeat=2):
+        for i, j in itertools.product(range(enc_length),repeat=2):
             def set_relation(name):
                 relations[i, j] = self.relation_ids[name]
 
@@ -307,16 +489,7 @@ class RelationalTransformerUpdate(torch.nn.Module):
                                 set_relation('tt_foreign_key_forward')
                             elif backward:
                                 set_relation('tt_foreign_key_backward')
-
-        relations_t = torch.tensor(relations, device=self._device)
-        enc_new = self.encoder(enc, relations_t, mask=None) 
-
-        # Split updated_enc again
-        q_enc_new = enc_new[:, :c_base]
-        c_enc_new = enc_new[:, c_base:t_base]
-        t_enc_new = enc_new[:, t_base:]
-        return q_enc_new, c_enc_new, t_enc_new
-
+        return relations
 
     @classmethod
     def match_foreign_key(cls, desc, col, table):
