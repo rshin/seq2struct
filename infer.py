@@ -37,6 +37,7 @@ def main():
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
+        torch.set_num_threads(1)
     if args.config_args:
         config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
     else:
@@ -63,7 +64,7 @@ def main():
 
     # 2. Restore its parameters
     saver = saver_mod.Saver(model, optimizer)
-    last_step = saver.restore(args.logdir, step=args.step)
+    last_step = saver.restore(args.logdir, step=args.step, map_location=device)
     if not last_step:
         raise Exception('Attempting to infer on untrained model')
 

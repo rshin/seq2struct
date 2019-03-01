@@ -20,6 +20,7 @@ def main():
     if args.output:
         with open(args.output, 'w') as f:
             json.dump(metrics, f)
+        print('Wrote eval results to {}'.format(args.output))
     else:
         print(metrics)
 

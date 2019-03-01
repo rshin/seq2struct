@@ -20,17 +20,13 @@ class ArgsDict(dict):
         self.__dict__ = self
 
 
-def load_checkpoint(model, optimizer, model_dir, map_to_cpu=False, step=None):
+def load_checkpoint(model, optimizer, model_dir, map_location=None, step=None):
     path = os.path.join(model_dir, 'model_checkpoint')
     if step is not None:
         path += '-{:08d}'.format(step)
     if os.path.exists(path):
         print("Loading model from %s" % path)
-        if map_to_cpu:
-            checkpoint = torch.load(
-                path, map_location=lambda storage, location: storage)
-        else:
-            checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location=map_location)
         old_state_dict = model.state_dict()
         for key in old_state_dict.keys():
             if key not in checkpoint['model']:
@@ -101,14 +97,14 @@ class Saver(object):
         self._optimizer = optimizer
         self._keep_every_n = keep_every_n
 
-    def restore(self, model_dir, map_to_cpu=False, step=None):
+    def restore(self, model_dir, map_location=None, step=None):
         """Restores model and optimizer from given directory.
 
         Returns:
            Last training step for the model restored.
         """
         last_step = load_checkpoint(
-            self._model, self._optimizer, model_dir, map_to_cpu, step)
+            self._model, self._optimizer, model_dir, map_location, step)
         return last_step
 
     def save(self, model_dir, step):
