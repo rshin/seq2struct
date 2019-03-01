@@ -8,7 +8,10 @@ import torch
 import torchtext
 
 from seq2struct.models import abstract_preproc
-from seq2struct.models import lstm
+try:
+    from seq2struct.models import lstm
+except ImportError:
+    pass
 from seq2struct.models import spider_enc_modules
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
@@ -376,11 +379,23 @@ class SpiderEncoderV2(torch.nn.Module):
                 output_size=self.recurrent_size,
                 dropout=self.dropout,
                 summarize=False),
+            'bilstm-native': lambda: spider_enc_modules.BiLSTM(
+                input_size=self.word_emb_size,
+                output_size=self.recurrent_size,
+                dropout=self.dropout,
+                summarize=False,
+                use_native=True),
             'bilstm-summarize': lambda: spider_enc_modules.BiLSTM(
                 input_size=self.word_emb_size,
                 output_size=self.recurrent_size,
                 dropout=self.dropout,
                 summarize=True),
+            'bilstm-native-summarize': lambda: spider_enc_modules.BiLSTM(
+                input_size=self.word_emb_size,
+                output_size=self.recurrent_size,
+                dropout=self.dropout,
+                summarize=True,
+                use_native=True),
         }
 
         modules = []

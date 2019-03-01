@@ -17,7 +17,10 @@ from seq2struct import ast_util
 from seq2struct import grammars
 from seq2struct.models import abstract_preproc
 from seq2struct.models import attention
-from seq2struct.models import lstm
+try:
+    from seq2struct.models import lstm
+except ImportError:
+    pass
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 from seq2struct.utils import serialization

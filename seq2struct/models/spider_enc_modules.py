@@ -5,7 +5,10 @@ import numpy as np
 import torch
 from torch import nn
 
-from seq2struct.models import lstm
+try:
+    from seq2struct.models import lstm
+except ImportError:
+    pass
 from seq2struct.models import transformer
 from seq2struct.utils import batched_sequence
 
@@ -108,7 +111,7 @@ class LookupEmbeddings(torch.nn.Module):
 
 
 class BiLSTM(torch.nn.Module):
-    def __init__(self, input_size, output_size, dropout, summarize):
+    def __init__(self, input_size, output_size, dropout, summarize, use_native=False):
         # input_size: dimensionality of input
         # output_size: dimensionality of output
         # dropout
@@ -117,12 +120,21 @@ class BiLSTM(torch.nn.Module):
         # - False: return Tensor of seq len x batch x emb size 
         super().__init__()
 
-        self.lstm = lstm.LSTM(
-                input_size=input_size,
-                hidden_size=output_size // 2,
-                bidirectional=True,
-                dropout=dropout)
+        if use_native:
+            self.lstm = torch.nn.LSTM(
+                    input_size=input_size,
+                    hidden_size=output_size // 2,
+                    bidirectional=True,
+                    dropout=dropout)
+            self.dropout = torch.nn.Dropout(dropout)
+        else:
+            self.lstm = lstm.LSTM(
+                    input_size=input_size,
+                    hidden_size=output_size // 2,
+                    bidirectional=True,
+                    dropout=dropout)
         self.summarize = summarize
+        self.use_native = use_native
 
     def forward_unbatched(self, input_):
         # all_embs shape: sum of desc lengths x batch (=1) x input_size
@@ -135,7 +147,11 @@ class BiLSTM(torch.nn.Module):
             # - h: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
             # - c: num_layers (=1) * num_directions (=2) x batch (=1) x recurrent_size / 2
             # output shape: seq len x batch size x output_size
-            output, (h, c) = self.lstm(all_embs[left:right])
+            if self.use_native:
+                inp = self.dropout(all_embs[left:right])
+                output, (h, c) = self.lstm(inp)
+            else:
+                output, (h, c) = self.lstm(all_embs[left:right])
             if self.summarize:
                 seq_emb = torch.cat((h[0], h[1]), dim=-1).unsqueeze(0)
                 new_boundaries.append(new_boundaries[-1] + 1)
@@ -183,6 +199,8 @@ class BiLSTM(torch.nn.Module):
         # state shape:
         # - h: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
         # - c: [num_layers (=1) * num_directions (=2), batch, output_size / 2]
+        if self.use_native:
+            rearranged_all_embs = rearranged_all_embs.apply(self.dropout)
         output, (h, c) = self.lstm(rearranged_all_embs.ps)
         if self.summarize:
             # h shape: [batch * num descs, output_size]
