@@ -113,6 +113,9 @@ class EncDecModel(torch.nn.Module):
         valid, validation_info =  self.preproc.enc_preproc.validate_item(item, 'train')
         if not valid:
             return None
-        enc_input =  self.preproc.enc_preproc.preprocess_item(item, validation_info)
-        enc_state = self.encoder(enc_input)
+        enc_input = self.preproc.enc_preproc.preprocess_item(item, validation_info)
+        if getattr(self.encoder, 'batched'):
+            enc_state, = self.encoder([enc_input])
+        else:
+            enc_state = self.encoder(enc_input)
         return self.decoder.begin_inference(enc_state, item)

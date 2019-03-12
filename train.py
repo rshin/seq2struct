@@ -54,12 +54,13 @@ class Logger:
 def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
     stats = collections.defaultdict(float)
     model.eval()
-    for eval_batch in eval_data_loader:
-        batch_res = model.eval_on_batch(eval_batch)
-        for k, v in batch_res.items():
-            stats[k] += v
-        if num_eval_items and stats['total'] > num_eval_items:
-            break
+    with torch.no_grad():
+      for eval_batch in eval_data_loader:
+          batch_res = model.eval_on_batch(eval_batch)
+          for k, v in batch_res.items():
+              stats[k] += v
+          if num_eval_items and stats['total'] > num_eval_items:
+              break
     model.train()
 
     # Divide each stat by 'total'

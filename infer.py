@@ -3,6 +3,7 @@ import ast
 import itertools
 import json
 import os
+import sys
 
 import _jsonnet
 import asdl
@@ -47,7 +48,7 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
     if os.path.exists(args.output):
         print('Output file {} already exists'.format(args.output))
-        return
+        sys.exit(1)
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
