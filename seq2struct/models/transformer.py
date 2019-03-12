@@ -207,9 +207,13 @@ class MultiHeadedAttentionWithRelations(nn.Module):
 # Adapted from The Annotated Transformer
 class Encoder(nn.Module):
     "Core encoder is a stack of N layers"
-    def __init__(self, layer, layer_size, N):
+    def __init__(self, layer, layer_size, N, tie_layers=False):
         super(Encoder, self).__init__()
-        self.layers = clones(layer, N)
+        if tie_layers:
+            self.layer = layer()
+            self.layers = [self.layer for _ in range(N)]
+        else:
+            self.layers = clones(layer, N)
         self.norm = nn.LayerNorm(layer_size)
          
          # TODO initialize using xavier

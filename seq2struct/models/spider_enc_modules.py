@@ -229,6 +229,8 @@ class RelationalTransformerUpdate(torch.nn.Module):
     def __init__(self, device, num_layers, num_heads, hidden_size, 
             ff_size=None,
             dropout=0.1,
+            merge_types=False,
+            tie_layers=False,
             qq_max_dist=2,
             #qc_token_match=True,
             #qt_token_match=True,
@@ -318,6 +320,31 @@ class RelationalTransformerUpdate(torch.nn.Module):
             add_relation('tt_foreign_key_both')
         add_rel_dist('tt_dist', tt_max_dist)
 
+        if merge_types:
+            assert not cc_foreign_key
+            assert not cc_table_match
+            assert not ct_foreign_key
+            assert not ct_table_match
+            assert not tc_foreign_key
+            assert not tc_table_match
+            assert not tt_foreign_key
+
+            assert cc_max_dist == qq_max_dist
+            assert tt_max_dist == qq_max_dist
+
+            add_relation('xx_default')
+            self.relation_ids['qc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['qt_default'] = self.relation_ids['xx_default']
+            self.relation_ids['cq_default'] = self.relation_ids['xx_default']
+            self.relation_ids['cc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['ct_default'] = self.relation_ids['xx_default']
+            self.relation_ids['tc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['tt_default'] = self.relation_ids['xx_default']
+
+            for i in range(-qq_max_dist, qq_max_dist + 1):
+                self.relation_ids['cc_dist', i] = self.relation_ids['qq_dist', i]
+                self.relation_ids['tt_dist', i] = self.relation_ids['tt_dist', i]
+
         if ff_size is None:
             ff_size = hidden_size * 4
         self.encoder = transformer.Encoder(
@@ -334,7 +361,8 @@ class RelationalTransformerUpdate(torch.nn.Module):
                 len(self.relation_ids),
                 dropout),
             hidden_size,
-            num_layers)
+            num_layers,
+            tie_layers)
     
     def forward_unbatched(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
         # enc shape: total len x batch (=1) x recurrent size
