@@ -62,6 +62,7 @@ class EncDecModel(torch.nn.Module):
                 'encoder', encoder, device=device, preproc=preproc.enc_preproc)
         self.decoder = registry.construct(
                 'decoder', decoder, device=device, preproc=preproc.dec_preproc)
+        self.decoder.visualize_flag = False
         
         if getattr(self.encoder, 'batched'):
             self.compute_loss = self._compute_loss_enc_batched
@@ -114,6 +115,13 @@ class EncDecModel(torch.nn.Module):
         if not valid:
             return None
         enc_input = self.preproc.enc_preproc.preprocess_item(item, validation_info)
+        if self.visualize_flag:
+            print('question:')
+            print(enc_input['question'])
+            print('columns:')
+            print(enc_input['columns'])
+            print('tables:')
+            print(enc_input['tables'])
         if getattr(self.encoder, 'batched'):
             enc_state, = self.encoder([enc_input])
         else:

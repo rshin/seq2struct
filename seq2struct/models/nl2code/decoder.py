@@ -559,7 +559,9 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_action_emb,
             desc_enc):
         # desc_context shape: batch (=1) x emb_size
-        desc_context, _ = self._desc_attention(prev_state, desc_enc)
+        desc_context, attention_weights = self._desc_attention(prev_state, desc_enc)
+        if self.visualize_flag:
+            print(attention_weights)
         # node_type_emb shape: batch (=1) x emb_size
         node_type_emb = self.node_type_embedding(
                 self._index(self.node_type_vocab, node_type))

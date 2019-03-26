@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--beam-size', required=True, type=int)
     parser.add_argument('--output-history', action='store_true')
     parser.add_argument('--limit', type=int)
-    parser.add_argument('--mode', default='infer')
+    parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -60,6 +60,7 @@ def main():
     model = registry.construct('model', config['model'], preproc=model_preproc, device=device)
     model.to(device)
     model.eval()
+    model.visualize_flag = False
 
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
 
@@ -92,6 +93,15 @@ def main():
             else:
                 sliced_data = data
             debug(model, sliced_data, output)
+        elif args.mode == 'visualize_attention':
+            model.visualize_flag = True
+            model.decoder.visualize_flag = True
+            data = registry.construct('dataset', config['data'][args.section])
+            if args.limit:
+                sliced_data = itertools.islice(data, args.limit)
+            else:
+                sliced_data = data
+            visualize_attention(model, args.beam_size, args.output_history, sliced_data, output)
 
 
 def infer(model, beam_size, output_history, sliced_data, output):
@@ -130,6 +140,34 @@ def debug(model, sliced_data, output):
                 }) + '\n')
         output.flush()
 
+def visualize_attention(model, beam_size, output_history, sliced_data, output):
+    for i, item in enumerate(tqdm.tqdm(sliced_data)):
+        print('sample index: ')
+        print(i)
+        beams = beam_search.beam_search(
+            model, item, beam_size=beam_size, max_steps=1000)
+        entry = item.orig
+        print('ground truth SQL:')
+        print(entry['query_toks'])
+        decoded = []
+        for beam in beams:
+            model_output, inferred_code = beam.inference_state.finalize()
+
+            decoded.append({
+                'model_output': model_output,
+                'inferred_code': inferred_code,
+                'score': beam.score,
+                **({
+                    'choice_history': beam.choice_history,
+                    'score_history': beam.score_history,
+                } if output_history else {})})
+
+        output.write(
+            json.dumps({
+                'index': i,
+                'beams': decoded,
+            }) + '\n')
+        output.flush()
 
 if __name__ == '__main__':
     main()
