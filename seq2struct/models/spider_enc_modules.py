@@ -552,5 +552,6 @@ class NoOpUpdate:
         pass
 
     def __call__(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
-        return q_enc.transpose(0, 1), c_enc.transpose(0, 1), t_enc.transpose(0, 1)
+        #return q_enc.transpose(0, 1), c_enc.transpose(0, 1), t_enc.transpose(0, 1)
+        return q_enc, c_enc, t_enc
 
