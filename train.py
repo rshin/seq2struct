@@ -101,6 +101,10 @@ def main():
     train_config = registry.instantiate(TrainConfig, config['train'])
 
     logger = Logger(os.path.join(args.logdir, 'log.txt'))
+    with open(os.path.join(args.logdir,
+      'config-{}.json'.format(
+        datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
+        json.dump(config, f, sort_keys=True, indent=4)
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
