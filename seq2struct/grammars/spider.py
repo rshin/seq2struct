@@ -387,7 +387,7 @@ class SpiderUnparser:
     def unparse_sql(self, tree):
         # First, fix 'from'
         if 'from' not in tree:
-            tree = copy.deepcopy(tree)
+            tree = dict(tree)
 
             # Get all candidate columns
             candidate_column_ids = set(self.ast_wrapper.find_all_descendants_of_type(

@@ -342,6 +342,11 @@ class NL2CodeDecoder(torch.nn.Module):
                     h=8,
                     query_size=self.recurrent_size,
                     value_size=self.enc_recurrent_size)
+        elif desc_attn == 'mha-1h':
+            self.desc_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)
         else:
             # TODO: Figure out how to get right sizes (query, value) to module
             self.desc_attn = desc_attn

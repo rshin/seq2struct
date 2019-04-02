@@ -4,6 +4,7 @@ import operator
 import numpy as np
 import torch
 from torch import nn
+import torchtext
 
 try:
     from seq2struct.models import lstm
@@ -40,13 +41,18 @@ def get_attn_mask(seq_lengths):
 
 
 class LookupEmbeddings(torch.nn.Module):
-    def __init__(self, device, vocab, emb_size):
+    def __init__(self, device, vocab, embedder, emb_size):
         super().__init__()
         self._device = device
         self.vocab = vocab
+        self.embedder = embedder
+        self.emb_size = emb_size
 
         self.embedding = torch.nn.Embedding(
-            num_embeddings=len(self.vocab), embedding_dim=emb_size)
+                num_embeddings=len(self.vocab),
+                embedding_dim=emb_size)
+        if self.embedder:
+            assert emb_size == self.embedder.dim
 
     def forward_unbatched(self, token_lists):
         # token_lists: list of list of lists
@@ -76,8 +82,50 @@ class LookupEmbeddings(torch.nn.Module):
         boundaries = np.cumsum([0] + [emb.shape[0] for emb in embs])
 
         return all_embs, boundaries
+    
+    def _compute_boundaries(self, token_lists):
+        # token_lists: list of list of lists
+        # [batch, num descs, desc length]
+        # - each list contains tokens
+        # - each list corresponds to a column name, table name, etc.
+        boundaries = [
+            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
+            for token_lists_for_item in token_lists]
+
+        return boundaries
+
+    def _embed_token(self, token, batch_idx, out):
+        if self.embedder:
+            emb = self.embedder.lookup(token)
+        else:
+            emb = None
+        if emb is None:
+            emb = self.embedding.weight[self.vocab.index(token)]
+        out.copy_(emb)
 
     def forward(self, token_lists):
+        # token_lists: list of list of lists
+        # [batch, num descs, desc length]
+        # - each list contains tokens
+        # - each list corresponds to a column name, table name, etc.
+        # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
+        all_embs = batched_sequence.PackedSequencePlus.from_lists(
+            lists=[
+                [
+                    token
+                    for token_list in token_lists_for_item
+                    for token in token_list
+                ]
+                for token_lists_for_item in token_lists
+            ],
+            item_shape=(self.emb_size,),
+            tensor_type=torch.FloatTensor,
+            item_to_tensor=self._embed_token)
+        all_embs = all_embs.apply(lambda d: d.to(self._device))
+        
+        return all_embs, self._compute_boundaries(token_lists)
+
+    def _embed_words_learned(self, token_lists):
         # token_lists: list of list of lists
         # [batch, num descs, desc length]
         # - each list contains tokens
@@ -102,12 +150,7 @@ class LookupEmbeddings(torch.nn.Module):
         # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
         all_embs = indices.apply(lambda x: self.embedding(x.squeeze(-1)))
 
-        # boundaries shape: [batch, num descs + 1]
-        boundaries = [
-            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
-            for token_lists_for_item in token_lists]
-
-        return all_embs, boundaries
+        return all_embs, self._compute_boundaries(token_lists)
 
 
 class BiLSTM(torch.nn.Module):
