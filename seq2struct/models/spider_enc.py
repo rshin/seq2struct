@@ -411,6 +411,9 @@ class SpiderEncoderV2(torch.nn.Module):
                 self.vocab,
                 self.preproc.word_emb,
                 self.word_emb_size),
+            'linear': lambda: spider_enc_modules.EmbLinear(
+                input_size=self.word_emb_size,
+                output_size=self.word_emb_size),
             'bilstm': lambda: spider_enc_modules.BiLSTM(
                 input_size=self.word_emb_size,
                 output_size=self.recurrent_size,

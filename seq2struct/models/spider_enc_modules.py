@@ -153,6 +153,17 @@ class LookupEmbeddings(torch.nn.Module):
         return all_embs, self._compute_boundaries(token_lists)
 
 
+class EmbLinear(torch.nn.Module):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        self.linear = torch.nn.Linear(input_size, output_size)
+    
+    def forward(self, input_):
+        all_embs, boundaries = input_
+        all_embs = all_embs.apply(lambda d: self.linear(d))
+        return all_embs, boundaries
+
+
 class BiLSTM(torch.nn.Module):
     def __init__(self, input_size, output_size, dropout, summarize, use_native=False):
         # input_size: dimensionality of input
