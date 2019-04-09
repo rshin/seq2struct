@@ -19,21 +19,22 @@ from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--logdir', required=True)
+parser.add_argument('--config', required=True)
+parser.add_argument('--config-args')
+
+parser.add_argument('--step', type=int)
+parser.add_argument('--section', required=True)
+parser.add_argument('--output', required=True)
+parser.add_argument('--beam-size', required=True, type=int)
+parser.add_argument('--output-history', action='store_true')
+parser.add_argument('--limit', type=int)
+parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
+parser.add_argument('--res', default='outputs/outputs.json')
+args = parser.parse_args()
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', required=True)
-    parser.add_argument('--config', required=True)
-    parser.add_argument('--config-args')
-
-    parser.add_argument('--step', type=int)
-    parser.add_argument('--section', required=True)
-    parser.add_argument('--output', required=True)
-    parser.add_argument('--beam-size', required=True, type=int)
-    parser.add_argument('--output-history', action='store_true')
-    parser.add_argument('--limit', type=int)
-    parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
-    args = parser.parse_args()
-
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:
@@ -141,7 +142,11 @@ def debug(model, sliced_data, output):
         output.flush()
 
 def visualize_attention(model, beam_size, output_history, sliced_data, output):
+    res = json.load(open(args.res, 'r'))
+    res = res['per_item']
     for i, item in enumerate(tqdm.tqdm(sliced_data)):
+        if res[i]['exact'] is True:
+            continue
         print('sample index: ')
         print(i)
         beams = beam_search.beam_search(
@@ -149,6 +154,8 @@ def visualize_attention(model, beam_size, output_history, sliced_data, output):
         entry = item.orig
         print('ground truth SQL:')
         print(entry['query_toks'])
+        print('prediction:')
+        print(res[i])
         decoded = []
         for beam in beams:
             model_output, inferred_code = beam.inference_state.finalize()

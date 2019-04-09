@@ -1068,6 +1068,14 @@ class TreeTraversal:
     def update_using_last_choice(self, last_choice, extra_choice_info):
         if last_choice is None:
             return
+        if self.model.visualize_flag:
+            print('cur_item.state', self.cur_item.state)
+            if self.cur_item.state == TreeTraversal.State.SUM_TYPE_APPLY or \
+            self.cur_item.state == TreeTraversal.State.CHILDREN_APPLY or \
+            self.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY:
+                print('last choice', self.model.preproc.all_rules[last_choice])
+            else:
+                print('last choice', last_choice)
         self.update_prev_action_emb(self, last_choice, extra_choice_info)
     
     @classmethod

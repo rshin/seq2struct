@@ -146,7 +146,6 @@ class LookupEmbeddings(torch.nn.Module):
             item_to_tensor=lambda token, batch_idx, out: out.fill_(self.vocab.index(token))
         )
         indices = indices.apply(lambda d: d.to(self._device))
-
         # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
         all_embs = indices.apply(lambda x: self.embedding(x.squeeze(-1)))
 
