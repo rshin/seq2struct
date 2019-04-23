@@ -14,14 +14,15 @@ class Hypothesis:
     score_history = attr.ib(factory=list)
 
 
-def beam_search(model, item, beam_size, max_steps):
+def beam_search(model, item, beam_size, max_steps, visualize_flag=False):
     inference_state, next_choices = model.begin_inference(item)
     beam = [Hypothesis(inference_state, next_choices)]
     finished = []
 
     for step in range(max_steps):
-        print('step:')
-        print(step)
+        if visualize_flag:
+            print('step:')
+            print(step)
         # Check if all beams are finished
         if len(finished) == beam_size:
             break

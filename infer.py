@@ -31,7 +31,8 @@ parser.add_argument('--beam-size', required=True, type=int)
 parser.add_argument('--output-history', action='store_true')
 parser.add_argument('--limit', type=int)
 parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
-parser.add_argument('--res', default='outputs/outputs.json')
+parser.add_argument('--res1', default='outputs/glove-sup-att-output-from/outputs.json')
+parser.add_argument('--res2', default='outputs/glove-sup-att-output-from/outputs.json')
 args = parser.parse_args()
 
 def main():
@@ -142,20 +143,22 @@ def debug(model, sliced_data, output):
         output.flush()
 
 def visualize_attention(model, beam_size, output_history, sliced_data, output):
-    res = json.load(open(args.res, 'r'))
-    res = res['per_item']
+    res1 = json.load(open(args.res1, 'r'))
+    res1 = res1['per_item']
+    res2 = json.load(open(args.res2, 'r'))
+    res2 = res2['per_item']
     for i, item in enumerate(tqdm.tqdm(sliced_data)):
-        if res[i]['exact'] is True:
+        if (res1[i]['exact'] == 1) or (res2[i]['exact'] == 1):
             continue
         print('sample index: ')
         print(i)
         beams = beam_search.beam_search(
-            model, item, beam_size=beam_size, max_steps=1000)
+            model, item, beam_size=beam_size, max_steps=1000, visualize_flag=True)
         entry = item.orig
         print('ground truth SQL:')
         print(entry['query_toks'])
         print('prediction:')
-        print(res[i])
+        print(res2[i])
         decoded = []
         for beam in beams:
             model_output, inferred_code = beam.inference_state.finalize()

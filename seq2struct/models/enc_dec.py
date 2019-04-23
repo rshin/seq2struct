@@ -74,7 +74,7 @@ class EncDecModel(torch.nn.Module):
         enc_states = self.encoder([enc_input for enc_input, dec_output in batch])
 
         for enc_state, (enc_input, dec_output) in zip(enc_states, batch):
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses
@@ -85,7 +85,7 @@ class EncDecModel(torch.nn.Module):
         losses = []
         for enc_input, dec_output in batch:
             enc_state, = self.encoder([enc_input])
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses
@@ -96,7 +96,7 @@ class EncDecModel(torch.nn.Module):
         losses = []
         for enc_input, dec_output in batch:
             enc_state = self.encoder(enc_input)
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses

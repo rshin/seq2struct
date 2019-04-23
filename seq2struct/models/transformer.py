@@ -103,7 +103,7 @@ def attention(query, key, value, mask=None, dropout=None):
     p_attn = F.softmax(scores, dim = -1)
     if dropout is not None:
         p_attn = dropout(p_attn)
-    return torch.matmul(p_attn, value), p_attn
+    return torch.matmul(p_attn, value), scores.squeeze(1).squeeze(1)
 
 
 # Adapted from The Annotated Transformers
