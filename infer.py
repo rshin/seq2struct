@@ -31,8 +31,9 @@ parser.add_argument('--beam-size', required=True, type=int)
 parser.add_argument('--output-history', action='store_true')
 parser.add_argument('--limit', type=int)
 parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
-parser.add_argument('--res1', default='outputs/glove-sup-att-output-from/outputs.json')
-parser.add_argument('--res2', default='outputs/glove-sup-att-output-from/outputs.json')
+parser.add_argument('--res1', default='outputs/glove-sup-att-1h-0/outputs.json')
+parser.add_argument('--res2', default='outputs/glove-sup-att-1h-1/outputs.json')
+parser.add_argument('--res3', default='outputs/glove-sup-att-1h-2/outputs.json')
 args = parser.parse_args()
 
 def main():
@@ -147,9 +148,20 @@ def visualize_attention(model, beam_size, output_history, sliced_data, output):
     res1 = res1['per_item']
     res2 = json.load(open(args.res2, 'r'))
     res2 = res2['per_item']
+    res3 = json.load(open(args.res3, 'r'))
+    res3 = res3['per_item']
+    interest_cnt = 0
+    cnt = 0
     for i, item in enumerate(tqdm.tqdm(sliced_data)):
-        if (res1[i]['exact'] == 1) or (res2[i]['exact'] == 1):
+        
+        if res1[i]['hardness'] != 'extra':
             continue
+        
+        cnt += 1
+        if (res1[i]['exact'] == 0) and (res2[i]['exact'] == 0) and (res3[i]['exact'] == 0):
+            continue
+        interest_cnt += 1
+        '''
         print('sample index: ')
         print(i)
         beams = beam_search.beam_search(
@@ -178,6 +190,8 @@ def visualize_attention(model, beam_size, output_history, sliced_data, output):
                 'beams': decoded,
             }) + '\n')
         output.flush()
+        '''
+    print(interest_cnt * 1.0 / cnt)
 
 if __name__ == '__main__':
     main()

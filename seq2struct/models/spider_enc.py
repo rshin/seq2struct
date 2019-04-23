@@ -21,6 +21,8 @@ from seq2struct.utils import serialization
 class SpiderEncoderState:
     state = attr.ib()
     memory = attr.ib()
+    question_memory = attr.ib()
+    schema_memory = attr.ib()
     words = attr.ib()
 
     pointer_memories = attr.ib()
@@ -575,6 +577,8 @@ class SpiderEncoderV2(torch.nn.Module):
             result.append(SpiderEncoderState(
                 state=None,
                 memory=memory,
+                question_memory=q_enc_new.select(batch_idx).unsqueeze(0),
+                schema_memory=torch.cat((c_enc_new_item, t_enc_new_item), dim=1),
                 # TODO: words should match memory
                 words=desc['question'],
                 pointer_memories={

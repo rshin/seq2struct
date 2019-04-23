@@ -334,6 +334,7 @@ class NL2CodeDecoder(torch.nn.Module):
                 input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
                 hidden_size=self.recurrent_size,
                 dropout=dropout)
+        self.attn_type = desc_attn
         if desc_attn == 'bahdanau':
             self.desc_attn = attention.BahdanauAttention(
                     query_size=self.recurrent_size,
@@ -349,6 +350,15 @@ class NL2CodeDecoder(torch.nn.Module):
                     h=1,
                     query_size=self.recurrent_size,
                     value_size=self.enc_recurrent_size)
+        elif desc_attn == 'sep':
+            self.question_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)
+            self.schema_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)       
         else:
             # TODO: Figure out how to get right sizes (query, value) to module
             self.desc_attn = desc_attn
@@ -483,9 +493,15 @@ class NL2CodeDecoder(torch.nn.Module):
                     values = pointer_map[node]
                     if self.sup_att == '1h':
                         if len(pointer_map) == len(enc_input['columns']):
-                            traversal.step(values[0], values[1:], node + len(enc_input['question']))
+                            if self.attn_type != 'sep':
+                                traversal.step(values[0], values[1:], node + len(enc_input['question']))
+                            else:
+                                traversal.step(values[0], values[1:], node)
                         else:
-                            traversal.step(values[0], values[1:], node + len(enc_input['question']) + len(enc_input['columns']))
+                            if self.attn_type != 'sep':
+                                traversal.step(values[0], values[1:], node + len(enc_input['question']) + len(enc_input['columns']))
+                            else:
+                                traversal.step(values[0], values[1:], node + len(enc_input['columns']))
                     else:
                         traversal.step(values[0], values[1:])
                 else:
@@ -555,7 +571,12 @@ class NL2CodeDecoder(torch.nn.Module):
         # - h_n: batch (=1) x emb_size
         # - c_n: batch (=1) x emb_size
         query = prev_state[0]
-        return self.desc_attn(query, desc_enc.memory, attn_mask=None)
+        if self.attn_type != 'sep':
+            return self.desc_attn(query, desc_enc.memory, attn_mask=None)
+        else:
+            question_context, question_attention_logits = self.question_attn(query, desc_enc.question_memory)
+            schema_context, schema_attention_logits = self.schema_attn(query, desc_enc.schema_memory)
+            return question_context + schema_context, schema_attention_logits
     
     def _tensor(self, data, dtype=None):
         return torch.tensor(data, dtype=dtype, device=self._device)

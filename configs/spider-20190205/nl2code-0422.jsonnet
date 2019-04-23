@@ -9,8 +9,7 @@ local _0402 = import 'nl2code-0402.jsonnet';
 function(args) _0402(args) + {
     model+: {
         decoder+: {
-            desc_attn: 'sep',
-            sup_att: '1h'
+            desc_attn: 'sep'
         },
     },
 }
