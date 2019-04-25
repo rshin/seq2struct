@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, TextIO, Tuple, Union
 # pylint: enable=unused-import
 
 import asdl
+import attr
 
 
 class ASTWrapperVisitor(asdl.VisitorBase):
@@ -273,3 +274,9 @@ class ASTWrapper(object):
 
 # Improve this when mypy supports recursive types.
 Node = Dict[str, Any]
+
+@attr.s
+class HoleValuePlaceholder:
+    id = attr.ib()
+    is_seq = attr.ib()
+    is_opt = attr.ib()
