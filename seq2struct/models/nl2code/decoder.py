@@ -919,6 +919,8 @@ class TreeTraversal:
                         TreeTraversal.InHole(self.cur_item.item_id))
                     return choices
                 elif isinstance(next_item, tuple):
+                    # TODO: the `v`s (should be log probabilities) need to be
+                    # normalized for beam search to be valid
                     choices = [(k, v) for k, v in self.template_stack.top.last_choices
                         if k in next_item]
                     #self.template_stack = self.template_stack.evolve_top(last_choices=choices)
@@ -1343,8 +1345,10 @@ class TreeTraversal:
                 
                 if hvp_present:
                     rule_indices = tuple(
-                        self.model.rules_index[node['_type'], p]
-                        for p in itertools.product(*presence_values)
+                        rule_idx for rule_idx in (
+                          self.model.rules_index.get((node['_type'], p))
+                          for p in itertools.product(*presence_values))
+                        if rule_idx is not None
                     )
                     if len(rule_indices) == 1:
                         self.step(rule_indices[0])
@@ -1409,9 +1413,9 @@ class TreeTraversal:
     def pop(self, check_hole_finished):
         if self.queue:
             if (check_hole_finished and 
-                not self.template_stack.empty and
-                isinstance(self.template_stack.top, TreeTraversal.InHole) and 
-                self.template_stack.top.item_id_to_finish == self.cur_item.item_id):
+                    not self.template_stack.empty and
+                    isinstance(self.template_stack.top, TreeTraversal.InHole) and 
+                    self.template_stack.top.item_id_to_finish == self.cur_item.item_id):
                 assert not self.template_stack.top.is_finished
                 self.template_stack = self.template_stack.evolve_top(is_finished=True)
             self.cur_item = self.queue[-1]
@@ -1421,9 +1425,8 @@ class TreeTraversal:
 
     def process_choices(self, choices):
         if (not self.template_stack.empty
-            and isinstance(self.template_stack.top,
-              TreeTraversal.ExecutingStep)):
-
+                and isinstance(self.template_stack.top,
+                  TreeTraversal.ExecutingStep)):
             _, self.template_stack = self.template_stack.pop()
             should_return = (
                 self.template_stack.empty or

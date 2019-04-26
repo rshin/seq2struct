@@ -246,7 +246,7 @@ class ASTWrapper(object):
 
             for item in items:
                 assert check(item)
-            return True
+        return True
     
     def find_all_descendants_of_type(self, tree, type, descend_pred=lambda field: True):
         queue = [tree]
