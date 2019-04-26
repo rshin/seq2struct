@@ -42,18 +42,19 @@ class SpiderLanguage:
             self, 
             output_from=False,
             use_table_pointer=False,
-            include_literals=True):
+            include_literals=True,
+            include_columns=True):
+
+        custom_primitive_type_checkers = {}
+        self.pointers = set()
+
         if use_table_pointer:
-            custom_primitive_type_checkers = {
-                'column': lambda x: isinstance(x, int),
-                'table': lambda x: isinstance(x, int),
-            }
-            self.pointers = {'column', 'table'}
-        else:
-            custom_primitive_type_checkers = {
-                'column': lambda x: isinstance(x, int),
-            }
-            self.pointers = {'column'}
+            custom_primitive_type_checkers['table'] = lambda x: isinstance(x, int)
+            self.pointers.add('table')
+
+        if include_columns:
+            custom_primitive_type_checkers['column'] = lambda x: isinstance(x, int)
+            self.pointers.add('column')
 
         self.ast_wrapper = ast_util.ASTWrapper(
                 asdl.parse(
@@ -63,6 +64,7 @@ class SpiderLanguage:
                 custom_primitive_type_checkers=custom_primitive_type_checkers)
         self.output_from = output_from
         self.include_literals = include_literals
+        self.include_columns = include_columns
         if not self.output_from:
             sql_fields = self.ast_wrapper.product_types['sql'].fields
             assert sql_fields[1].name == 'from'
@@ -75,6 +77,10 @@ class SpiderLanguage:
                 if field.name == 'limit':
                     field.opt = False
                     field.type = 'singleton'
+        if not include_columns:
+            col_unit_fields = self.ast_wrapper.singular_types['col_unit'].fields
+            assert col_unit_fields[1].name == 'col_id'
+            del col_unit_fields[1]
 
     def parse(self, code, section):
         return self.parse_sql(code)
@@ -130,12 +136,14 @@ class SpiderLanguage:
 
     def parse_col_unit(self, col_unit):
         agg_id, col_id, is_distinct = col_unit
-        return {
+        result = {
                 '_type': 'col_unit',
                 'agg_id': {'_type': self.AGG_TYPES_F[agg_id]},
-                'col_id': col_id,
                 'is_distinct': is_distinct,
         }
+        if self.include_columns:
+            result['col_id'] = col_id
+        return result
 
     def parse_val_unit(self, val_unit):
         unit_op, col_unit1, col_unit2 = val_unit
@@ -321,11 +329,14 @@ class SpiderUnparser:
             return '({})'.format(self.unparse_sql(val['s']))
 
     def unparse_col_unit(self, col_unit):
-        column = self.schema.columns[col_unit['col_id']]
-        if column.table is None:
-            column_name = column.orig_name
+        if 'col_id' in col_unit:
+            column = self.schema.columns[col_unit['col_id']]
+            if column.table is None:
+                column_name = column.orig_name
+            else:
+                column_name = '{}.{}'.format(column.table.orig_name, column.orig_name)
         else:
-            column_name = '{}.{}'.format(column.table.orig_name, column.orig_name)
+            column_name = 'some_col'
 
         if col_unit['is_distinct']:
             column_name = 'DISTINCT {}'.format(column_name)
@@ -376,7 +387,7 @@ class SpiderUnparser:
     def unparse_sql(self, tree):
         # First, fix 'from'
         if 'from' not in tree:
-            tree = copy.deepcopy(tree)
+            tree = dict(tree)
 
             # Get all candidate columns
             candidate_column_ids = set(self.ast_wrapper.find_all_descendants_of_type(

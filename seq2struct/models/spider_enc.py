@@ -21,6 +21,8 @@ from seq2struct.utils import serialization
 class SpiderEncoderState:
     state = attr.ib()
     memory = attr.ib()
+    question_memory = attr.ib()
+    schema_memory = attr.ib()
     words = attr.ib()
 
     pointer_memories = attr.ib()
@@ -233,16 +235,24 @@ class SpiderEncoderV2(torch.nn.Module):
                 save_path,
                 min_freq=3,
                 max_count=5000,
-                include_table_name_in_column=True):
-            self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
+                include_table_name_in_column=True,
+                word_emb=None,
+                count_tokens_in_word_emb_for_vocab=False):
+            if word_emb is None:
+                self.word_emb = None
+            else:
+                self.word_emb = registry.construct('word_emb', word_emb)
+
             self.data_dir = os.path.join(save_path, 'enc')
             self.include_table_name_in_column = include_table_name_in_column
-
-            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+            self.count_tokens_in_word_emb_for_vocab = count_tokens_in_word_emb_for_vocab
             # TODO: Write 'train', 'val', 'test' somewhere else
             self.texts = {'train': [], 'val': [], 'test': []}
 
+            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+            self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
             self.vocab = None
+            self.counted_db_ids = set()
 
         def validate_item(self, item, section):
             return True, None
@@ -252,10 +262,22 @@ class SpiderEncoderV2(torch.nn.Module):
             self.texts[section].append(preprocessed)
 
             if section == 'train':
-                for token in itertools.chain(
-                        preprocessed['question'],
-                        *preprocessed['columns']):
-                    self.vocab_builder.add_word(token)
+                if item.schema.db_id in self.counted_db_ids:
+                    to_count = preprocessed['question']
+                else:
+                    self.counted_db_ids.add(item.schema.db_id)
+                    to_count = itertools.chain(
+                            preprocessed['question'],
+                            *preprocessed['columns'],
+                            *preprocessed['tables'])
+
+                for token in to_count:
+                    count_token = (
+                        self.word_emb is None or 
+                        self.count_tokens_in_word_emb_for_vocab or
+                        self.word_emb.lookup(token) is None)
+                    if count_token:
+                        self.vocab_builder.add_word(token)
 
         def preprocess_item(self, item, validation_info):
             column_names = []
@@ -266,12 +288,16 @@ class SpiderEncoderV2(torch.nn.Module):
             foreign_keys = {}
             foreign_keys_tables = collections.defaultdict(set)
 
-            # TODO: things in brackets won't work with fixed embeddings
             last_table_id = None
             for i, column in enumerate(item.schema.columns):
-                column_name = ['<type: {}>'.format(column.type)] + column.name
+                column_name = ['<type: {}>'.format(column.type)] + self._tokenize(
+                        column.name, column.unsplit_name)
                 if self.include_table_name_in_column:
-                    table_name = ['<any-table>'] if column.table is None else column.table.name
+                    if column.table is None:
+                        table_name = ['<any-table>']
+                    else:
+                        table_name = self._tokenize(
+                            column.table.name, column.table.unsplit_name)
                     column_name += ['<table-sep>'] + table_name
                 column_names.append(column_name)
 
@@ -291,10 +317,16 @@ class SpiderEncoderV2(torch.nn.Module):
             assert len(table_bounds) == len(item.schema.tables) + 1
 
             for i, table in enumerate(item.schema.tables):
-                table_names.append(table.name)
+                table_names.append(self._tokenize(
+                    table.name, table.unsplit_name))
 
+            if self.word_emb:
+                question = self.word_emb.tokenize(item.orig['question'])
+            else:
+                question = item.text
             return {
-                'question': item.text,
+                'question': self._tokenize(item.text, item.orig['question']),
+                'db_id': item.schema.db_id,
                 'columns': column_names,
                 'tables': table_names,
                 'table_bounds': table_bounds,
@@ -308,6 +340,11 @@ class SpiderEncoderV2(torch.nn.Module):
                     for table in item.schema.tables
                 ],
             }
+
+        def _tokenize(self, presplit, unsplit):
+            if self.word_emb:
+                return self.word_emb.tokenize(unsplit)
+            return presplit
 
         def save(self):
             os.makedirs(self.data_dir, exist_ok=True)
@@ -342,6 +379,7 @@ class SpiderEncoderV2(torch.nn.Module):
             ):
         super().__init__()
         self._device = device
+        self.preproc = preproc
         self.vocab = preproc.vocab
 
         self.word_emb_size = word_emb_size
@@ -373,7 +411,11 @@ class SpiderEncoderV2(torch.nn.Module):
             'emb': lambda: spider_enc_modules.LookupEmbeddings(
                 self._device,
                 self.vocab,
+                self.preproc.word_emb,
                 self.word_emb_size),
+            'linear': lambda: spider_enc_modules.EmbLinear(
+                input_size=self.word_emb_size,
+                output_size=self.word_emb_size),
             'bilstm': lambda: spider_enc_modules.BiLSTM(
                 input_size=self.word_emb_size,
                 output_size=self.recurrent_size,
@@ -535,6 +577,8 @@ class SpiderEncoderV2(torch.nn.Module):
             result.append(SpiderEncoderState(
                 state=None,
                 memory=memory,
+                question_memory=q_enc_new.select(batch_idx).unsqueeze(0),
+                schema_memory=torch.cat((c_enc_new_item, t_enc_new_item), dim=1),
                 # TODO: words should match memory
                 words=desc['question'],
                 pointer_memories={

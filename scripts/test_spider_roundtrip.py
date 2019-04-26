@@ -35,8 +35,8 @@ def main():
     grammar = registry.construct('grammar', config['model']['decoder_preproc']['grammar'])
 
     evaluator = evaluation.Evaluator(
-            'data/spider-20181217/database',
-            evaluation.build_foreign_key_map_from_json('data/spider-20181217/tables.json'),
+            'data/spider-20190205/database',
+            evaluation.build_foreign_key_map_from_json('data/spider-20190205/tables.json'),
             'match')
 
     for i, item in enumerate(tqdm.tqdm(train_data, dynamic_ncols=True)):
@@ -48,8 +48,8 @@ def main():
                 item.orig['query'].replace('\t', ' '),
                 sql)
 
-        #gold.write('{}\t{}\n'.format(item.orig['query'].replace('\t', ' '), item.schema.db_id))
-        #predicted.write('{}\n'.format(sql))
+        gold.write('{}\t{}\n'.format(item.orig['query'].replace('\t', ' '), item.schema.db_id))
+        predicted.write('{}\n'.format(sql))
 
 if __name__ == '__main__':
     main()

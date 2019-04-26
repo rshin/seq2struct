@@ -54,12 +54,13 @@ class Logger:
 def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
     stats = collections.defaultdict(float)
     model.eval()
-    for eval_batch in eval_data_loader:
-        batch_res = model.eval_on_batch(eval_batch)
-        for k, v in batch_res.items():
-            stats[k] += v
-        if num_eval_items and stats['total'] > num_eval_items:
-            break
+    with torch.no_grad():
+      for eval_batch in eval_data_loader:
+          batch_res = model.eval_on_batch(eval_batch)
+          for k, v in batch_res.items():
+              stats[k] += v
+          if num_eval_items and stats['total'] > num_eval_items:
+              break
     model.train()
 
     # Divide each stat by 'total'
@@ -100,6 +101,10 @@ def main():
     train_config = registry.instantiate(TrainConfig, config['train'])
 
     logger = Logger(os.path.join(args.logdir, 'log.txt'))
+    with open(os.path.join(args.logdir,
+      'config-{}.json'.format(
+        datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
+        json.dump(config, f, sort_keys=True, indent=4)
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(

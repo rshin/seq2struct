@@ -62,6 +62,7 @@ class EncDecModel(torch.nn.Module):
                 'encoder', encoder, device=device, preproc=preproc.enc_preproc)
         self.decoder = registry.construct(
                 'decoder', decoder, device=device, preproc=preproc.dec_preproc)
+        self.decoder.visualize_flag = False
         
         if getattr(self.encoder, 'batched'):
             self.compute_loss = self._compute_loss_enc_batched
@@ -73,7 +74,7 @@ class EncDecModel(torch.nn.Module):
         enc_states = self.encoder([enc_input for enc_input, dec_output in batch])
 
         for enc_state, (enc_input, dec_output) in zip(enc_states, batch):
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses
@@ -84,7 +85,7 @@ class EncDecModel(torch.nn.Module):
         losses = []
         for enc_input, dec_output in batch:
             enc_state, = self.encoder([enc_input])
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses
@@ -95,7 +96,7 @@ class EncDecModel(torch.nn.Module):
         losses = []
         for enc_input, dec_output in batch:
             enc_state = self.encoder(enc_input)
-            loss = self.decoder.compute_loss(dec_output, enc_state, debug)
+            loss = self.decoder.compute_loss(enc_input, dec_output, enc_state, debug)
             losses.append(loss)
         if debug:
             return losses
@@ -113,6 +114,16 @@ class EncDecModel(torch.nn.Module):
         valid, validation_info =  self.preproc.enc_preproc.validate_item(item, 'train')
         if not valid:
             return None
-        enc_input =  self.preproc.enc_preproc.preprocess_item(item, validation_info)
-        enc_state = self.encoder(enc_input)
+        enc_input = self.preproc.enc_preproc.preprocess_item(item, validation_info)
+        if self.visualize_flag:
+            print('question:')
+            print(enc_input['question'])
+            print('columns:')
+            print(enc_input['columns'])
+            print('tables:')
+            print(enc_input['tables'])
+        if getattr(self.encoder, 'batched'):
+            enc_state, = self.encoder([enc_input])
+        else:
+            enc_state = self.encoder(enc_input)
         return self.decoder.begin_inference(enc_state, item)

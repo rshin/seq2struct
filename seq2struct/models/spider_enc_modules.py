@@ -4,6 +4,7 @@ import operator
 import numpy as np
 import torch
 from torch import nn
+import torchtext
 
 try:
     from seq2struct.models import lstm
@@ -40,13 +41,18 @@ def get_attn_mask(seq_lengths):
 
 
 class LookupEmbeddings(torch.nn.Module):
-    def __init__(self, device, vocab, emb_size):
+    def __init__(self, device, vocab, embedder, emb_size):
         super().__init__()
         self._device = device
         self.vocab = vocab
+        self.embedder = embedder
+        self.emb_size = emb_size
 
         self.embedding = torch.nn.Embedding(
-            num_embeddings=len(self.vocab), embedding_dim=emb_size)
+                num_embeddings=len(self.vocab),
+                embedding_dim=emb_size)
+        if self.embedder:
+            assert emb_size == self.embedder.dim
 
     def forward_unbatched(self, token_lists):
         # token_lists: list of list of lists
@@ -76,8 +82,50 @@ class LookupEmbeddings(torch.nn.Module):
         boundaries = np.cumsum([0] + [emb.shape[0] for emb in embs])
 
         return all_embs, boundaries
+    
+    def _compute_boundaries(self, token_lists):
+        # token_lists: list of list of lists
+        # [batch, num descs, desc length]
+        # - each list contains tokens
+        # - each list corresponds to a column name, table name, etc.
+        boundaries = [
+            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
+            for token_lists_for_item in token_lists]
+
+        return boundaries
+
+    def _embed_token(self, token, batch_idx, out):
+        if self.embedder:
+            emb = self.embedder.lookup(token)
+        else:
+            emb = None
+        if emb is None:
+            emb = self.embedding.weight[self.vocab.index(token)]
+        out.copy_(emb)
 
     def forward(self, token_lists):
+        # token_lists: list of list of lists
+        # [batch, num descs, desc length]
+        # - each list contains tokens
+        # - each list corresponds to a column name, table name, etc.
+        # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
+        all_embs = batched_sequence.PackedSequencePlus.from_lists(
+            lists=[
+                [
+                    token
+                    for token_list in token_lists_for_item
+                    for token in token_list
+                ]
+                for token_lists_for_item in token_lists
+            ],
+            item_shape=(self.emb_size,),
+            tensor_type=torch.FloatTensor,
+            item_to_tensor=self._embed_token)
+        all_embs = all_embs.apply(lambda d: d.to(self._device))
+        
+        return all_embs, self._compute_boundaries(token_lists)
+
+    def _embed_words_learned(self, token_lists):
         # token_lists: list of list of lists
         # [batch, num descs, desc length]
         # - each list contains tokens
@@ -98,15 +146,20 @@ class LookupEmbeddings(torch.nn.Module):
             item_to_tensor=lambda token, batch_idx, out: out.fill_(self.vocab.index(token))
         )
         indices = indices.apply(lambda d: d.to(self._device))
-
         # PackedSequencePlus, with shape: [batch, sum of desc lengths, emb_size]
         all_embs = indices.apply(lambda x: self.embedding(x.squeeze(-1)))
 
-        # boundaries shape: [batch, num descs + 1]
-        boundaries = [
-            np.cumsum([0] + [len(token_list) for token_list in token_lists_for_item])
-            for token_lists_for_item in token_lists]
+        return all_embs, self._compute_boundaries(token_lists)
 
+
+class EmbLinear(torch.nn.Module):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        self.linear = torch.nn.Linear(input_size, output_size)
+    
+    def forward(self, input_):
+        all_embs, boundaries = input_
+        all_embs = all_embs.apply(lambda d: self.linear(d))
         return all_embs, boundaries
 
 
@@ -229,6 +282,8 @@ class RelationalTransformerUpdate(torch.nn.Module):
     def __init__(self, device, num_layers, num_heads, hidden_size, 
             ff_size=None,
             dropout=0.1,
+            merge_types=False,
+            tie_layers=False,
             qq_max_dist=2,
             #qc_token_match=True,
             #qt_token_match=True,
@@ -318,6 +373,31 @@ class RelationalTransformerUpdate(torch.nn.Module):
             add_relation('tt_foreign_key_both')
         add_rel_dist('tt_dist', tt_max_dist)
 
+        if merge_types:
+            assert not cc_foreign_key
+            assert not cc_table_match
+            assert not ct_foreign_key
+            assert not ct_table_match
+            assert not tc_foreign_key
+            assert not tc_table_match
+            assert not tt_foreign_key
+
+            assert cc_max_dist == qq_max_dist
+            assert tt_max_dist == qq_max_dist
+
+            add_relation('xx_default')
+            self.relation_ids['qc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['qt_default'] = self.relation_ids['xx_default']
+            self.relation_ids['cq_default'] = self.relation_ids['xx_default']
+            self.relation_ids['cc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['ct_default'] = self.relation_ids['xx_default']
+            self.relation_ids['tc_default'] = self.relation_ids['xx_default']
+            self.relation_ids['tt_default'] = self.relation_ids['xx_default']
+
+            for i in range(-qq_max_dist, qq_max_dist + 1):
+                self.relation_ids['cc_dist', i] = self.relation_ids['qq_dist', i]
+                self.relation_ids['tt_dist', i] = self.relation_ids['tt_dist', i]
+
         if ff_size is None:
             ff_size = hidden_size * 4
         self.encoder = transformer.Encoder(
@@ -334,7 +414,8 @@ class RelationalTransformerUpdate(torch.nn.Module):
                 len(self.relation_ids),
                 dropout),
             hidden_size,
-            num_layers)
+            num_layers,
+            tie_layers)
     
     def forward_unbatched(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
         # enc shape: total len x batch (=1) x recurrent size
@@ -524,5 +605,6 @@ class NoOpUpdate:
         pass
 
     def __call__(self, desc, q_enc, c_enc, c_boundaries, t_enc, t_boundaries):
-        return q_enc.transpose(0, 1), c_enc.transpose(0, 1), t_enc.transpose(0, 1)
+        #return q_enc.transpose(0, 1), c_enc.transpose(0, 1), t_enc.transpose(0, 1)
+        return q_enc, c_enc, t_enc
 

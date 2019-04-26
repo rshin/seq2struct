@@ -3,6 +3,7 @@ import ast
 import itertools
 import json
 import os
+import sys
 
 import _jsonnet
 import asdl
@@ -18,21 +19,24 @@ from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--logdir', required=True)
+parser.add_argument('--config', required=True)
+parser.add_argument('--config-args')
+
+parser.add_argument('--step', type=int)
+parser.add_argument('--section', required=True)
+parser.add_argument('--output', required=True)
+parser.add_argument('--beam-size', required=True, type=int)
+parser.add_argument('--output-history', action='store_true')
+parser.add_argument('--limit', type=int)
+parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
+parser.add_argument('--res1', default='outputs/glove-sup-att-1h-0/outputs.json')
+parser.add_argument('--res2', default='outputs/glove-sup-att-1h-1/outputs.json')
+parser.add_argument('--res3', default='outputs/glove-sup-att-1h-2/outputs.json')
+args = parser.parse_args()
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', required=True)
-    parser.add_argument('--config', required=True)
-    parser.add_argument('--config-args')
-
-    parser.add_argument('--step', type=int)
-    parser.add_argument('--section', required=True)
-    parser.add_argument('--output', required=True)
-    parser.add_argument('--beam-size', required=True, type=int)
-    parser.add_argument('--output-history', action='store_true')
-    parser.add_argument('--limit', type=int)
-    parser.add_argument('--mode', default='infer')
-    args = parser.parse_args()
-
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:
@@ -47,7 +51,7 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
     if os.path.exists(args.output):
         print('Output file {} already exists'.format(args.output))
-        return
+        sys.exit(1)
 
     # 0. Construct preprocessors
     model_preproc = registry.instantiate(
@@ -59,6 +63,7 @@ def main():
     model = registry.construct('model', config['model'], preproc=model_preproc, device=device)
     model.to(device)
     model.eval()
+    model.visualize_flag = False
 
     optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
 
@@ -91,6 +96,15 @@ def main():
             else:
                 sliced_data = data
             debug(model, sliced_data, output)
+        elif args.mode == 'visualize_attention':
+            model.visualize_flag = True
+            model.decoder.visualize_flag = True
+            data = registry.construct('dataset', config['data'][args.section])
+            if args.limit:
+                sliced_data = itertools.islice(data, args.limit)
+            else:
+                sliced_data = data
+            visualize_attention(model, args.beam_size, args.output_history, sliced_data, output)
 
 
 def infer(model, beam_size, output_history, sliced_data, output):
@@ -129,6 +143,55 @@ def debug(model, sliced_data, output):
                 }) + '\n')
         output.flush()
 
+def visualize_attention(model, beam_size, output_history, sliced_data, output):
+    res1 = json.load(open(args.res1, 'r'))
+    res1 = res1['per_item']
+    res2 = json.load(open(args.res2, 'r'))
+    res2 = res2['per_item']
+    res3 = json.load(open(args.res3, 'r'))
+    res3 = res3['per_item']
+    interest_cnt = 0
+    cnt = 0
+    for i, item in enumerate(tqdm.tqdm(sliced_data)):
+        
+        if res1[i]['hardness'] != 'extra':
+            continue
+        
+        cnt += 1
+        if (res1[i]['exact'] == 0) and (res2[i]['exact'] == 0) and (res3[i]['exact'] == 0):
+            continue
+        interest_cnt += 1
+        '''
+        print('sample index: ')
+        print(i)
+        beams = beam_search.beam_search(
+            model, item, beam_size=beam_size, max_steps=1000, visualize_flag=True)
+        entry = item.orig
+        print('ground truth SQL:')
+        print(entry['query_toks'])
+        print('prediction:')
+        print(res2[i])
+        decoded = []
+        for beam in beams:
+            model_output, inferred_code = beam.inference_state.finalize()
+
+            decoded.append({
+                'model_output': model_output,
+                'inferred_code': inferred_code,
+                'score': beam.score,
+                **({
+                    'choice_history': beam.choice_history,
+                    'score_history': beam.score_history,
+                } if output_history else {})})
+
+        output.write(
+            json.dumps({
+                'index': i,
+                'beams': decoded,
+            }) + '\n')
+        output.flush()
+        '''
+    print(interest_cnt * 1.0 / cnt)
 
 if __name__ == '__main__':
     main()

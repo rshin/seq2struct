@@ -103,7 +103,7 @@ def attention(query, key, value, mask=None, dropout=None):
     p_attn = F.softmax(scores, dim = -1)
     if dropout is not None:
         p_attn = dropout(p_attn)
-    return torch.matmul(p_attn, value), p_attn
+    return torch.matmul(p_attn, value), scores.squeeze(1).squeeze(1)
 
 
 # Adapted from The Annotated Transformers
@@ -207,9 +207,13 @@ class MultiHeadedAttentionWithRelations(nn.Module):
 # Adapted from The Annotated Transformer
 class Encoder(nn.Module):
     "Core encoder is a stack of N layers"
-    def __init__(self, layer, layer_size, N):
+    def __init__(self, layer, layer_size, N, tie_layers=False):
         super(Encoder, self).__init__()
-        self.layers = clones(layer, N)
+        if tie_layers:
+            self.layer = layer()
+            self.layers = [self.layer for _ in range(N)]
+        else:
+            self.layers = clones(layer, N)
         self.norm = nn.LayerNorm(layer_size)
          
          # TODO initialize using xavier

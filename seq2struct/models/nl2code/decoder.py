@@ -12,6 +12,7 @@ import asdl
 import attr
 import pyrsistent
 import torch
+import torch.nn.functional as F
 
 from seq2struct import ast_util
 from seq2struct import grammars
@@ -297,7 +298,8 @@ class NL2CodeDecoder(torch.nn.Module):
             dropout=0.,
             desc_attn='bahdanau',
             copy_pointer=None,
-            multi_loss_type='logsumexp'):
+            multi_loss_type='logsumexp',
+            sup_att=None):
         super().__init__()
         self._device = device
         self.preproc = preproc
@@ -332,6 +334,7 @@ class NL2CodeDecoder(torch.nn.Module):
                 input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
                 hidden_size=self.recurrent_size,
                 dropout=dropout)
+        self.attn_type = desc_attn
         if desc_attn == 'bahdanau':
             self.desc_attn = attention.BahdanauAttention(
                     query_size=self.recurrent_size,
@@ -342,9 +345,24 @@ class NL2CodeDecoder(torch.nn.Module):
                     h=8,
                     query_size=self.recurrent_size,
                     value_size=self.enc_recurrent_size)
+        elif desc_attn == 'mha-1h':
+            self.desc_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)
+        elif desc_attn == 'sep':
+            self.question_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)
+            self.schema_attn = attention.MultiHeadedAttention(
+                    h=1,
+                    query_size=self.recurrent_size,
+                    value_size=self.enc_recurrent_size)       
         else:
             # TODO: Figure out how to get right sizes (query, value) to module
             self.desc_attn = desc_attn
+        self.sup_att = sup_att
 
         self.rule_logits = torch.nn.Sequential(
                 torch.nn.Linear(self.recurrent_size, self.rule_emb_size),
@@ -435,10 +453,9 @@ class NL2CodeDecoder(torch.nn.Module):
 
         return all_rules, rules_mask
 
-    def compute_loss(self, example, desc_enc, debug=False):
+    def compute_loss(self, enc_input, example, desc_enc, debug=False):
         traversal = TrainTreeTraversal(self, desc_enc, debug)
         traversal.step(None)
-
         queue = [
             TreeState(
                 node=example.tree,
@@ -474,7 +491,19 @@ class NL2CodeDecoder(torch.nn.Module):
                 pointer_map = desc_enc.pointer_maps.get(parent_field_type)
                 if pointer_map:
                     values = pointer_map[node]
-                    traversal.step(values[0], values[1:])
+                    if self.sup_att == '1h':
+                        if len(pointer_map) == len(enc_input['columns']):
+                            if self.attn_type != 'sep':
+                                traversal.step(values[0], values[1:], node + len(enc_input['question']))
+                            else:
+                                traversal.step(values[0], values[1:], node)
+                        else:
+                            if self.attn_type != 'sep':
+                                traversal.step(values[0], values[1:], node + len(enc_input['question']) + len(enc_input['columns']))
+                            else:
+                                traversal.step(values[0], values[1:], node + len(enc_input['columns']))
+                    else:
+                        traversal.step(values[0], values[1:])
                 else:
                     traversal.step(node)
                 continue
@@ -542,7 +571,12 @@ class NL2CodeDecoder(torch.nn.Module):
         # - h_n: batch (=1) x emb_size
         # - c_n: batch (=1) x emb_size
         query = prev_state[0]
-        return self.desc_attn(query, desc_enc.memory, attn_mask=None)
+        if self.attn_type != 'sep':
+            return self.desc_attn(query, desc_enc.memory, attn_mask=None)
+        else:
+            question_context, question_attention_logits = self.question_attn(query, desc_enc.question_memory)
+            schema_context, schema_attention_logits = self.schema_attn(query, desc_enc.schema_memory)
+            return question_context + schema_context, schema_attention_logits
     
     def _tensor(self, data, dtype=None):
         return torch.tensor(data, dtype=dtype, device=self._device)
@@ -559,7 +593,10 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_action_emb,
             desc_enc):
         # desc_context shape: batch (=1) x emb_size
-        desc_context, _ = self._desc_attention(prev_state, desc_enc)
+        desc_context, attention_logits = self._desc_attention(prev_state, desc_enc)
+        if self.visualize_flag:
+            attention_weights = F.softmax(attention_logits, dim = -1)
+            print(attention_weights)
         # node_type_emb shape: batch (=1) x emb_size
         node_type_emb = self.node_type_embedding(
                 self._index(self.node_type_vocab, node_type))
@@ -576,7 +613,7 @@ class NL2CodeDecoder(torch.nn.Module):
         new_state = self.state_update(
                 # state_input shape: batch (=1) x (emb_size * 5)
                 state_input, prev_state)
-        return new_state
+        return new_state, attention_logits
 
     def apply_rule(
             self,
@@ -586,7 +623,7 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_h,
             parent_action_emb,
             desc_enc):
-        new_state = self._update_state(
+        new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
         output = new_state[0]
@@ -612,7 +649,7 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_h,
             parent_action_emb,
             desc_enc):
-        new_state = self._update_state(
+        new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
         output = new_state[0]
@@ -719,7 +756,7 @@ class NL2CodeDecoder(torch.nn.Module):
             parent_h,
             parent_action_emb,
             desc_enc):
-        new_state = self._update_state(
+        new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
         output = new_state[0]
@@ -727,7 +764,7 @@ class NL2CodeDecoder(torch.nn.Module):
         pointer_logits = self.pointers[node_type](
             output, desc_enc.pointer_memories[node_type])
 
-        return output, new_state, pointer_logits
+        return output, new_state, pointer_logits, attention_logits
     
     def pointer_infer(self, node_type, logits):
         logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
@@ -886,7 +923,7 @@ class TreeTraversal:
         other.update_prev_action_emb = self.update_prev_action_emb
         return other
 
-    def step(self, last_choice, extra_choice_info=None):
+    def step(self, last_choice, extra_choice_info=None, attention_offset=None):
         SUM_TYPE_INQUIRE    = TreeTraversal.State.SUM_TYPE_INQUIRE
         SUM_TYPE_APPLY      = TreeTraversal.State.SUM_TYPE_APPLY
         CHILDREN_INQUIRE    = TreeTraversal.State.CHILDREN_INQUIRE
@@ -972,7 +1009,7 @@ class TreeTraversal:
             #    else:
             #        raise ValueError(next_template_item)
 
-            self.update_using_last_choice(last_choice, extra_choice_info)
+            self.update_using_last_choice(last_choice, extra_choice_info, attention_offset)
 
             # TODO: Replace this switch with overridden methods.
             # 1. ApplyRule, like expr -> Call
@@ -1199,7 +1236,7 @@ class TreeTraversal:
             
             elif self.cur_item.state == POINTER_INQUIRE:
                 # a. Ask which one to choose
-                output, self.recurrent_state, logits = self.model.compute_pointer(
+                output, self.recurrent_state, logits, attention_logits = self.model.compute_pointer(
                         self.cur_item.node_type, 
                         self.recurrent_state,
                         self.prev_action_emb,
@@ -1213,7 +1250,7 @@ class TreeTraversal:
 
                 self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_pointer
                 should_return, choices = self.process_choices(
-                    self.pointer_choice(self.cur_item.node_type, logits))
+                    self.pointer_choice(self.cur_item.node_type, logits, attention_logits))
                 if should_return:
                     return choices
                 else:
@@ -1379,9 +1416,17 @@ class TreeTraversal:
         self.depth -= 1
         assert self.depth >= 0
 
-    def update_using_last_choice(self, last_choice, extra_choice_info):
+    def update_using_last_choice(self, last_choice, extra_choice_info, attention_offset):
         if last_choice is None:
             return
+        if self.model.visualize_flag:
+            print('cur_item.state', self.cur_item.state)
+            if self.cur_item.state == TreeTraversal.State.SUM_TYPE_APPLY or \
+            self.cur_item.state == TreeTraversal.State.CHILDREN_APPLY or \
+            self.cur_item.state == TreeTraversal.State.LIST_LENGTH_APPLY:
+                print('last choice', self.model.preproc.all_rules[last_choice])
+            else:
+                print('last choice', last_choice)
         self.update_prev_action_emb(self, last_choice, extra_choice_info)
     
     @classmethod
@@ -1446,7 +1491,7 @@ class TreeTraversal:
     def token_choice(self, output, gen_logodds):
         raise NotImplementedError
 
-    def pointer_choice(self, node_type, logits):
+    def pointer_choice(self, node_type, logits, attention_logits):
         raise NotImplementedError
 
 
@@ -1519,11 +1564,12 @@ class TrainTreeTraversal(TreeTraversal):
     def token_choice(self, output, gen_logodds):
         self.choice_point = self.TokenChoicePoint(output, gen_logodds)
     
-    def pointer_choice(self, node_type, logits):
+    def pointer_choice(self, node_type, logits, attention_logits):
         self.choice_point = self.XentChoicePoint(logits)
+        self.attention_choice = self.XentChoicePoint(attention_logits)
 
-    def update_using_last_choice(self, last_choice, extra_choice_info):
-        super().update_using_last_choice(last_choice, extra_choice_info)
+    def update_using_last_choice(self, last_choice, extra_choice_info, attention_offset):
+        super().update_using_last_choice(last_choice, extra_choice_info, attention_offset)
         if last_choice is None:
             return
 
@@ -1536,7 +1582,13 @@ class TrainTreeTraversal(TreeTraversal):
 
         self.loss = self.loss.append(
                 self.choice_point.compute_loss(self, last_choice, extra_choice_info))
+        
+        if attention_offset is not None and self.attention_choice is not None:
+            self.loss = self.loss.append(
+                self.attention_choice.compute_loss(self, attention_offset, extra_indices=None))
+        
         self.choice_point = None
+        self.attention_choice = None
 
 
 class InferenceTreeTraversal(TreeTraversal):
@@ -1598,7 +1650,7 @@ class InferenceTreeTraversal(TreeTraversal):
     def token_choice(self, output, gen_logodds):
         return self.model.token_infer(output, gen_logodds, self.desc_enc)
 
-    def pointer_choice(self, node_type, logits):
+    def pointer_choice(self, node_type, logits, attention_logits):
         # Group them based on pointer map
         pointer_logprobs = self.model.pointer_infer(node_type, logits)
         pointer_map = self.desc_enc.pointer_maps.get(node_type)
@@ -1615,8 +1667,8 @@ class InferenceTreeTraversal(TreeTraversal):
             for orig_index, mapped_indices in pointer_map.items()
         ]
 
-    def update_using_last_choice(self, last_choice, extra_choice_info):
-        super().update_using_last_choice(last_choice, extra_choice_info)
+    def update_using_last_choice(self, last_choice, extra_choice_info, attention_offset):
+        super().update_using_last_choice(last_choice, extra_choice_info, attention_offset)
 
         # Record actions
         # CHILDREN_INQUIRE

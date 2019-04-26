@@ -22,6 +22,7 @@ class Column:
     id = attr.ib()
     table = attr.ib()
     name = attr.ib()
+    unsplit_name = attr.ib()
     orig_name = attr.ib()
     type = attr.ib()
     foreign_key_for = attr.ib(default=None)
@@ -31,6 +32,7 @@ class Column:
 class Table:
     id = attr.ib()
     name = attr.ib()
+    unsplit_name = attr.ib()
     orig_name = attr.ib()
     columns = attr.ib(factory=list)
     primary_keys = attr.ib(factory=list)
@@ -58,7 +60,12 @@ class SpiderDataset(torch.utils.data.Dataset):
             schema_dicts  = json.load(open(path))
             for schema_dict in schema_dicts:
                 tables = tuple(
-                    Table(id=i, name=name.split(), orig_name=orig_name)
+                    Table(
+                        id=i,
+                        name=name.split(),
+                        unsplit_name=name,
+                        orig_name=orig_name,
+                    )
                     for i, (name, orig_name) in enumerate(zip(
                         schema_dict['table_names'], schema_dict['table_names_original']))
                 )
@@ -67,6 +74,7 @@ class SpiderDataset(torch.utils.data.Dataset):
                         id=i,
                         table=tables[table_id] if table_id >= 0 else None,
                         name=col_name.split(),
+                        unsplit_name=col_name,
                         orig_name=orig_col_name,
                         type=col_type,
                     )
