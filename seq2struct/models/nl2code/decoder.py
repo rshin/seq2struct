@@ -289,7 +289,6 @@ class NL2CodeDecoder(torch.nn.Module):
             device,
             preproc,
             #
-            max_seq_length=10,
             rule_emb_size=128,
             node_embed_size=64,
             # TODO: This should be automatically inferred from encoder
@@ -400,7 +399,7 @@ class NL2CodeDecoder(torch.nn.Module):
                     query_size=self.recurrent_size,
                     key_size=self.enc_recurrent_size)
             self.pointer_action_emb_proj[pointer_type] = torch.nn.Linear(
-                    self.recurrent_size, self.rule_emb_size)
+                    self.enc_recurrent_size, self.rule_emb_size)
 
         self.node_type_embedding = torch.nn.Embedding(
                 num_embeddings=len(self.node_type_vocab),
@@ -1041,7 +1040,9 @@ class TreeTraversal:
                 sum_type, singular_type = self.model.preproc.all_rules[last_choice]
                 assert sum_type == self.cur_item.node_type
 
-                template_with_placeholders = self.model.preproc.grammar.templates_containing_placeholders.get(singular_type)
+                template_with_placeholders = getattr(
+                    self.model.preproc.grammar, 'templates_containing_placeholders',
+                    {}).get(singular_type)
                 if template_with_placeholders:
                     template_traversal = TemplateTreeTraversal(self.model, self.desc_enc)
                     template_traversal.traverse_tree(template_with_placeholders, sum_type)

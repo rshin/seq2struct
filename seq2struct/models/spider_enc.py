@@ -375,7 +375,8 @@ class SpiderEncoderV2(torch.nn.Module):
             column_encoder=('emb', 'bilstm'),
             table_encoder=('emb', 'bilstm'),
             update_config={},
-            include_in_memory=('question', 'column', 'table')
+            include_in_memory=('question', 'column', 'table'),
+            batch_encs_update=True,
             ):
         super().__init__()
         self._device = device
@@ -405,6 +406,7 @@ class SpiderEncoderV2(torch.nn.Module):
             device=self._device,
             hidden_size=recurrent_size,
             )
+        self.batch_encs_update = batch_encs_update
 
     def _build_modules(self, module_types):
         module_builder = {
@@ -557,17 +559,29 @@ class SpiderEncoderV2(torch.nn.Module):
         # Update each other using self-attention
         # q_enc_new, c_enc_new, and t_enc_new are PackedSequencePlus with shape
         # batch (=1) x length x recurrent_size
-        q_enc_new, c_enc_new, t_enc_new = self.encs_update(
-                descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
+        if self.batch_encs_update:
+            q_enc_new, c_enc_new, t_enc_new = self.encs_update(
+                    descs, q_enc, c_enc, c_boundaries, t_enc, t_boundaries)
  
         result = []
         for batch_idx, desc in enumerate(descs):
-            c_enc_new_item = c_enc_new.select(batch_idx).unsqueeze(0)
-            t_enc_new_item = t_enc_new.select(batch_idx).unsqueeze(0)
+            if self.batch_encs_update:
+                q_enc_new_item = q_enc_new.select(batch_idx).unsqueeze(0)
+                c_enc_new_item = c_enc_new.select(batch_idx).unsqueeze(0)
+                t_enc_new_item = t_enc_new.select(batch_idx).unsqueeze(0)
+            else:
+                q_enc_new_item, c_enc_new_item, t_enc_new_item = \
+                        self.encs_update.forward_unbatched(
+                                desc,
+                                q_enc.select(batch_idx).unsqueeze(1),
+                                c_enc.select(batch_idx).unsqueeze(1),
+                                c_boundaries[batch_idx],
+                                t_enc.select(batch_idx).unsqueeze(1),
+                                t_boundaries[batch_idx])
 
             memory = []
             if 'question' in self.include_in_memory:
-                memory.append(q_enc_new.select(batch_idx).unsqueeze(0))
+                memory.append(q_enc_new_item)
             if 'column' in self.include_in_memory:
                 memory.append(c_enc_new_item)
             if 'table' in self.include_in_memory:
@@ -577,7 +591,7 @@ class SpiderEncoderV2(torch.nn.Module):
             result.append(SpiderEncoderState(
                 state=None,
                 memory=memory,
-                question_memory=q_enc_new.select(batch_idx).unsqueeze(0),
+                question_memory=q_enc_new_item,
                 schema_memory=torch.cat((c_enc_new_item, t_enc_new_item), dim=1),
                 # TODO: words should match memory
                 words=desc['question'],
