@@ -15,6 +15,7 @@ from seq2struct import models
 from seq2struct import optimizers
 
 from seq2struct.utils import registry
+from seq2struct.utils import random_state
 from seq2struct.utils import saver as saver_mod
 from seq2struct.utils import vocab
 
@@ -32,6 +33,14 @@ class TrainConfig:
     num_eval_items = attr.ib(default=None)
     eval_on_train = attr.ib(default=True)
     eval_on_val = attr.ib(default=True)
+
+    # Seed for RNG used in shuffling the training data.
+    data_seed = attr.ib(default=None)
+    # Seed for RNG used in initializing the model.
+    init_seed = attr.ib(default=None)
+    # Seed for RNG used in computing the model's training loss.
+    # Only relevant with internal randomness in the model, e.g. with dropout.
+    model_seed = attr.ib(default=None)
 
 
 class Logger:
@@ -102,27 +111,32 @@ def main():
 
     logger = Logger(os.path.join(args.logdir, 'log.txt'))
     with open(os.path.join(args.logdir,
-      'config-{}.json'.format(
-        datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
+          'config-{}.json'.format(
+            datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
         json.dump(config, f, sort_keys=True, indent=4)
 
-    # 0. Construct preprocessors
-    model_preproc = registry.instantiate(
-        registry.lookup('model', config['model']).Preproc,
-        config['model'],
-        unused_keys=('name',))
-    model_preproc.load()
+    init_random = random_state.RandomContext(train_config.init_seed)
+    data_random = random_state.RandomContext(train_config.data_seed)
+    model_random = random_state.RandomContext(train_config.model_seed)
 
-    # 1. Construct model
-    model = registry.construct('model', config['model'],
-            unused_keys=('encoder_preproc', 'decoder_preproc'), preproc=model_preproc, device=device)
-    model.to(device)
+    with init_random:
+        # 0. Construct preprocessors
+        model_preproc = registry.instantiate(
+            registry.lookup('model', config['model']).Preproc,
+            config['model'],
+            unused_keys=('name',))
+        model_preproc.load()
 
-    optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
-    lr_scheduler = registry.construct(
-            'lr_scheduler', 
-            config.get('lr_scheduler', {'name': 'noop'}),
-            optimizer=optimizer)
+        # 1. Construct model
+        model = registry.construct('model', config['model'],
+                unused_keys=('encoder_preproc', 'decoder_preproc'), preproc=model_preproc, device=device)
+        model.to(device)
+
+        optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
+        lr_scheduler = registry.construct(
+                'lr_scheduler',
+                config.get('lr_scheduler', {'name': 'noop'}),
+                optimizer=optimizer)
 
     # 2. Restore its parameters
     saver = saver_mod.Saver(
@@ -130,14 +144,15 @@ def main():
     last_step = saver.restore(args.logdir)
 
     # 3. Get training data somewhere
-    train_data = model_preproc.dataset('train')
-    train_data_loader = yield_batches_from_epochs(
-        torch.utils.data.DataLoader(
-            train_data,
-            batch_size=train_config.batch_size,
-            shuffle=True,
-            drop_last=True,
-            collate_fn=lambda x: x))
+    with data_random:
+        train_data = model_preproc.dataset('train')
+        train_data_loader = yield_batches_from_epochs(
+            torch.utils.data.DataLoader(
+                train_data,
+                batch_size=train_config.batch_size,
+                shuffle=True,
+                drop_last=True,
+                collate_fn=lambda x: x))
     train_eval_data_loader = torch.utils.data.DataLoader(
             train_data,
             batch_size=train_config.eval_batch_size,
@@ -150,33 +165,35 @@ def main():
             collate_fn=lambda x: x)
 
     # 4. Start training loop
-    for batch in train_data_loader:
-        # Quit if too long
-        if last_step >= train_config.max_steps:
-            break
+    with data_random:
+        for batch in train_data_loader:
+            # Quit if too long
+            if last_step >= train_config.max_steps:
+                break
 
-        # Evaluate model
-        if last_step % train_config.eval_every_n == 0:
-            if train_config.eval_on_train:
-                eval_model(logger, model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
-            if train_config.eval_on_val:
-                eval_model(logger, model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
-        
-        # Compute and apply gradient
-        optimizer.zero_grad()
-        loss = model.compute_loss(batch)
-        loss.backward()
-        lr_scheduler.update_lr(last_step)
-        optimizer.step()
+            # Evaluate model
+            if last_step % train_config.eval_every_n == 0:
+                if train_config.eval_on_train:
+                    eval_model(logger, model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
+                if train_config.eval_on_val:
+                    eval_model(logger, model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
 
-        # Report metrics
-        if last_step % train_config.report_every_n == 0:
-            logger.log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
+            # Compute and apply gradient
+            with model_random:
+                optimizer.zero_grad()
+                loss = model.compute_loss(batch)
+                loss.backward()
+                lr_scheduler.update_lr(last_step)
+                optimizer.step()
 
-        last_step += 1
-        # Run saver
-        if last_step % train_config.save_every_n == 0:
-            saver.save(args.logdir, last_step)
+            # Report metrics
+            if last_step % train_config.report_every_n == 0:
+                logger.log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
+
+            last_step += 1
+            # Run saver
+            if last_step % train_config.save_every_n == 0:
+                saver.save(args.logdir, last_step)
 
 
 if __name__ == '__main__':
