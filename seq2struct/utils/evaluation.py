@@ -1,15 +1,21 @@
 import json
+import os
 
 import _jsonnet
 
 from seq2struct import datasets
 from seq2struct.utils import registry
 
-def compute_metrics(config_path, config_args, section, inferred_path):
+def compute_metrics(config_path, config_args, section, inferred_path, logdir):
     if config_args:
         config = json.loads(_jsonnet.evaluate_file(config_path, tla_codes={'args': config_args}))
     else:
         config = json.loads(_jsonnet.evaluate_file(config_path))
+
+    if 'model_name' in config and logdir:
+        logdir = os.path.join(logdir, config['model_name'])
+    if logdir:
+        inferred_path = inferred_path.replace('__LOGDIR__', logdir)
 
     inferred = open(inferred_path)
     data = registry.construct('dataset', config['data'][section])
@@ -32,4 +38,4 @@ def compute_metrics(config_path, config_args, section, inferred_path):
         else:
             metrics.add(None, inferred_code, obsolete_gold_code=infer_results['gold_code'])
 
-    return metrics.finalize()
+    return logdir, metrics.finalize()

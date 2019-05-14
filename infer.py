@@ -74,7 +74,8 @@ def main():
         raise Exception('Attempting to infer on untrained model')
 
     # 3. Get training data somewhere
-    output = open(args.output, 'w')
+    output_path = args.output.replace('__LOGDIR__', args.logdir)
+    output = open(output_path, 'w')
     data = registry.construct('dataset', config['data'][args.section])
     if args.limit:
         sliced_data = itertools.islice(data, args.limit)
