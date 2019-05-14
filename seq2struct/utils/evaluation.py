@@ -6,7 +6,7 @@ import _jsonnet
 from seq2struct import datasets
 from seq2struct.utils import registry
 
-def compute_metrics(config_path, config_args, section, inferred_path, logdir):
+def compute_metrics(config_path, config_args, section, inferred_path,logdir=None):
     if config_args:
         config = json.loads(_jsonnet.evaluate_file(config_path, tla_codes={'args': config_args}))
     else:
