@@ -1,3 +1,6 @@
+# Same as nl2code.jsonnet, but
+# - max_steps halved to 40000
+
 local PREFIX = 'data/django/';
 {
     data: {
@@ -42,7 +45,7 @@ local PREFIX = 'data/django/';
         save_every_n: 100,
         report_every_n: 10,
 
-        max_steps: 80000,
+        max_steps: 40000,
         num_eval_items: 100,
     },
     optimizer: {
