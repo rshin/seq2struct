@@ -16,6 +16,7 @@ from seq2struct import datasets
 from seq2struct import models
 # noinspection PyUnresolvedReferences
 from seq2struct import optimizers
+from seq2struct import batching
 
 from seq2struct.utils import registry
 from seq2struct.utils import random_state

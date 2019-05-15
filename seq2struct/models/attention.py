@@ -1,6 +1,8 @@
+import attr
 import numpy as np
 import torch
 
+from seq2struct import batching
 from seq2struct.utils import registry
 from seq2struct.models import transformer
 
@@ -16,7 +18,44 @@ def maybe_mask(attn, attn_mask):
         attn.data.masked_fill_(attn_mask, -float('inf'))
 
 
+@attr.s(frozen=True)
+class AttentionBatchKey(batching.BatchKey):
+    ref_path = attr.ib()
+
+    @property
+    def iterable_keys(self):
+        return [0, 1]
+
+    def call_batched(self, existing_results, callable, query, values, attn_mask=None):
+        # query: list of tensors with shape [1, query_size]
+        # values: list of tensors with shape [1, num values, value_size]
+        batch_size = len(query)
+        num_values = [v.shape[1] for v in values]
+        max_num_values = max(v.shape[1] for v in values)
+
+        batched_query = torch.cat(query, dim=0)
+        batched_values = values[0].new(
+            batch_size, max_num_values, values[0].shape[2]).fill_(0)
+        for i, v in enumerate(values):
+            batched_values[i:i+1] = v
+        
+        # TODO: Handle other cases later
+        assert attn_mask is None or all(m is None for m in attn_mask)
+        ranges = torch.arange(0, max_num_values).unsqueeze(0).expand(batch_size, -1)
+        attn_mask = (ranges >= torch.tensor(num_values).unsqueeze(1)).to(values[0].device)
+
+        output, attn = callable(query, values, attn_mask)
+        return torch.split(output, dim=0), torch.split(attn, dim=0)
+    
+
+
 class Attention(torch.nn.Module):
+
+    class BatchCollator(batching.BatchCollator):
+        @classmethod
+        def batch_key(cls, orig_type, ref_path, query, values, attn_mask=None):
+            return AttentionBatchKey(ref_path=ref_path)
+
     def __init__(self, pointer):
         super().__init__()
         self.pointer = pointer
@@ -97,6 +136,9 @@ class BahdanauAttention(Attention):
 
 # Adapted from The Annotated Transformers
 class MultiHeadedAttention(torch.nn.Module):
+
+    BatchCollator = Attention.BatchCollator
+
     def __init__(self, h, query_size, value_size, dropout=0.1):
         super().__init__()
         assert query_size % h == 0

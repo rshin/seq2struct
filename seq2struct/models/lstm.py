@@ -16,6 +16,34 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
 
 
+class DropoutCreator(nn.Module):
+    def __init__(self, device, batch_size, dropout=0.):
+        super().__init__()
+        self._device = device
+        self.batch_size = batch_size
+        self.dropout = dropout
+
+    def forward(self):
+        if self.dropout:
+            if self.training:
+                input_dropout_mask = torch.bernoulli(
+                    torch.full(
+                        (batch_size, 4, self.input_size),
+                        1 - self.dropout,
+                        device=self._device))
+                h_dropout_mask = torch.bernoulli(
+                    torch.full(
+                        (batch_size, 4, self.input_size),
+                        1 - self.dropout,
+                        device=self._device))
+            else:
+                input_dropout_mask = h_dropout_mask = [1. - self.dropout] * 4
+        else:
+            input_dropout_mask = h_dropout_mask = [1.] * 4
+        
+        return input_dropout_mask, h_dropout_mask
+
+
 class RecurrentDropoutLSTMCell(RNNCellBase):
     def __init__(self, input_size, hidden_size, dropout=0.):
         super(RecurrentDropoutLSTMCell, self).__init__()
@@ -73,25 +101,40 @@ class RecurrentDropoutLSTMCell(RNNCellBase):
         else:
             self._input_dropout_mask = self._h_dropout_mask = [1.] * 4
 
-    def forward(self, input, hidden_state):
+    def forward(self, input, hidden_state, input_dropout_mask=None, h_dropout_mask=None):
         def get_mask_slice(mask, idx):
             if isinstance(mask, list): return mask[idx]
             else: return mask[idx][:input.size(0)]
+        def get_mask_slice2(mask, idx):
+            if isinstance(mask, list): return mask[idx]
+            else: return mask[:, idx]
 
         h_tm1, c_tm1 = hidden_state
 
         # if self._input_dropout_mask is None:
         #     self.set_dropout_masks(input.size(0))
 
-        xi_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 0), self.W_i)
-        xf_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 1), self.W_f)
-        xc_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 2), self.W_c)
-        xo_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 3), self.W_o)
+        if input_dropout_mask is None:
+            xi_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 0), self.W_i)
+            xf_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 1), self.W_f)
+            xc_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 2), self.W_c)
+            xo_t = F.linear(input * get_mask_slice(self._input_dropout_mask, 3), self.W_o)
+        else:
+            xi_t = F.linear(input * get_mask_slice2(input_dropout_mask, 0), self.W_i)
+            xf_t = F.linear(input * get_mask_slice2(input_dropout_mask, 1), self.W_f)
+            xc_t = F.linear(input * get_mask_slice2(input_dropout_mask, 2), self.W_c)
+            xo_t = F.linear(input * get_mask_slice2(input_dropout_mask, 3), self.W_o)
 
-        hi_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 0), self.U_i)
-        hf_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 1), self.U_f)
-        hc_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 2), self.U_c)
-        ho_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 3), self.U_o)
+        if h_dropout_mask is None:
+            hi_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 0), self.U_i)
+            hf_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 1), self.U_f)
+            hc_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 2), self.U_c)
+            ho_t = F.linear(h_tm1 * get_mask_slice(self._h_dropout_mask, 3), self.U_o)
+        else:
+            hi_t = F.linear(h_tm1 * get_mask_slice2(h_dropout_mask, 0), self.U_i)
+            hf_t = F.linear(h_tm1 * get_mask_slice2(h_dropout_mask, 1), self.U_f)
+            hc_t = F.linear(h_tm1 * get_mask_slice2(h_dropout_mask, 2), self.U_c)
+            ho_t = F.linear(h_tm1 * get_mask_slice2(h_dropout_mask, 3), self.U_o)
 
         if input.is_cuda:
             igates = torch.cat([xi_t, xf_t, xc_t, xo_t], dim=-1)

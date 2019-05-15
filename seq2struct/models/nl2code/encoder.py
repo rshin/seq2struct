@@ -4,6 +4,7 @@ import os
 import attr
 import torch
 
+from seq2struct import batching
 from seq2struct.models import abstract_preproc
 try:
     from seq2struct.models import lstm
@@ -23,7 +24,7 @@ class NL2CodeEncoderState:
 
 
 @registry.register('encoder', 'NL2Code')
-class NL2CodeEncoder(torch.nn.Module):
+class NL2CodeEncoder(batching.BatchedModule):
 
     batched = False
 

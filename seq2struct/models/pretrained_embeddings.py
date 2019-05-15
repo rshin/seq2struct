@@ -42,6 +42,19 @@ class Embedder(metaclass=abc.ABCMeta):
         '''Transfer the pretrained embeddings to the given device.'''
         pass
 
+    @property
+    @abc.abstractmethod
+    def requires_training(self):
+        '''Whether we need to first give the embedder a list of sentences.'''
+        pass
+    
+    def add_sentence(self, sentence):
+        '''Add a sentence for training.'''
+        pass
+    
+    def finalize(self):
+        '''Indicate that all sentences have been provided for training.'''
+        pass
 
 @registry.register('word_emb', 'glove')
 class GloVe(Embedder):
@@ -97,6 +110,10 @@ class GloVe(Embedder):
 
     def to(self, device):
         self.vectors = self.vectors.to(device)
+    
+    @property
+    def requires_training(self):
+        return False
 
     def __del__(self):
         self.corenlp_client.stop()
@@ -126,3 +143,35 @@ class BPEmb(Embedder):
 
     def to(self, device):
         self.vectors = self.vectors.to(device)
+
+    @property
+    def requires_training(self):
+        return False
+
+@registry.register('word_emb', 'sentencepiece')
+class SentencePiece(Embedder):
+    def __init__(self, save_prefix):
+        self.training_sentences = []
+        self.spm = None
+    
+    def tokenize(self, text):
+        return self.spm.encode(text)
+
+    def untokenize(self, tokens):
+        return self.bpemb.decode(tokens)
+
+    def lookup(self, token):
+        i = self.bpemb.spm.PieceToId(token)
+        if i == self.bpemb.spm.unk_id():
+            return None
+        return self.vectors[i]
+
+    def contains(self, token):
+        return self.lookup(token) is not None
+
+    def to(self, device):
+        self.vectors = self.vectors.to(device)
+
+    @property
+    def requires_training(self):
+        return False

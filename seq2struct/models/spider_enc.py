@@ -7,6 +7,7 @@ import attr
 import torch
 import torchtext
 
+from seq2struct import batching
 from seq2struct.models import abstract_preproc
 
 try:
@@ -36,7 +37,7 @@ class SpiderEncoderState:
 @registry.register('encoder', 'spider')
 class SpiderEncoder(torch.nn.Module):
 
-    batchd = False
+    batched = False
 
     class Preproc(abstract_preproc.AbstractPreproc):
         def __init__(
@@ -226,10 +227,28 @@ class SpiderEncoder(torch.nn.Module):
         return None
 
 
+@attr.s
+class SpiderEncoderV2BatchKey(batching.BatchKey):
+
+    ref_path = attr.ib()
+
+    def _combine(self, items):
+        return list(items)
+    
+    def _separate(self, combined):
+        return combined
+
+
 @registry.register('encoder', 'spiderv2')
 class SpiderEncoderV2(torch.nn.Module):
 
     batched = True
+    class BatchCollator(batching.BatchCollator):
+
+        @classmethod
+        def batch_key(cls, orig_type, ref_path, *args, **kwargs):
+            return SpiderEncoderV2BatchKey(ref_path)
+        
 
     class Preproc(abstract_preproc.AbstractPreproc):
         def __init__(

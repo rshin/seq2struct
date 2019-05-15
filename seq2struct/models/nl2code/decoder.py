@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from seq2struct import ast_util
 from seq2struct import grammars
+from seq2struct import batching
 from seq2struct.models import abstract_preproc
 from seq2struct.models import attention
 try:
@@ -279,8 +280,11 @@ class TreeState:
     parent_field_type = attr.ib()
 
 
+class LSTMStep(torch.nn.Module):
+    def __init__(self, device, )
+
 @registry.register('decoder', 'NL2Code')
-class NL2CodeDecoder(torch.nn.Module):
+class NL2CodeDecoder(batching.BatchedModule):
 
     Preproc = NL2CodeDecoderPreproc
 
@@ -329,6 +333,7 @@ class NL2CodeDecoder(torch.nn.Module):
                     sorted(self.preproc.seq_lengths.keys()),
                     special_elems=())
 
+        self.state_update_dropout = lstm.DropoutCreator(self._device, batch_size=1, dropout=dropout)
         self.state_update = lstm.RecurrentDropoutLSTMCell(
                 input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
                 hidden_size=self.recurrent_size,
@@ -558,7 +563,6 @@ class NL2CodeDecoder(torch.nn.Module):
             return loss, [attr.asdict(entry) for entry in traversal.history]
         else:
             return loss
-        
 
     def begin_inference(self, desc_enc, example):
         traversal = InferenceTreeTraversal(self, desc_enc, example)
@@ -885,7 +889,7 @@ class TreeTraversal:
         self.model = model
         self.desc_enc = desc_enc
 
-        model.state_update.set_dropout_masks(batch_size=1)
+        self.dropout_mask = model.state_update_dropout()
         self.recurrent_state = lstm_init(model._device, None, self.model.recurrent_size, 1)
         self.prev_action_emb = model.zero_rule_emb
 
