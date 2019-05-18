@@ -13,9 +13,9 @@
 #   - batch_size 10
 #   - Adam with lr 1e-3
 
-local PREFIX = 'data/spider-20190205/';
-
-function(output_from) {
+function(output_from, data_path='data/spider-20190205/') {
+    local PREFIX = data_path,
+    
     data: {
         train: {
             name: 'spider', 
