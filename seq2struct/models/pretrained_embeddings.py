@@ -1,11 +1,15 @@
 import abc
 import functools
 import os
+import time
 
 import bpemb
 import corenlp
+import requests
 import torch
 import torchtext
+from corenlp.client import PermanentlyFailedException
+from requests.exceptions import ConnectionError
 
 from seq2struct.utils import registry
 
@@ -67,7 +71,14 @@ class GloVe(Embedder):
 
     @functools.lru_cache(maxsize=1024)
     def tokenize(self, text):
-        ann = self.corenlp_client.annotate(text)
+        try:
+            ann = self.corenlp_client.annotate(text)
+        except (PermanentlyFailedException, ConnectionError):
+            print('\nWARNING: CoreNLP connection timeout. Recreating the server...')
+            self.corenlp_client.stop()
+            time.sleep(1)
+            self.corenlp_client.start()
+            ann = self.corenlp_client.annotate(text)
         return [tok.word.lower() for sent in ann.sentence for tok in sent.token]
 
     def untokenize(self, tokens):
@@ -84,6 +95,9 @@ class GloVe(Embedder):
 
     def to(self, device):
         self.vectors = self.vectors.to(device)
+
+    def __del__(self):
+        self.corenlp_client.stop()
 
 
 @registry.register('word_emb', 'bpemb')
