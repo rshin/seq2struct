@@ -60,7 +60,7 @@ class GloVe(Embedder):
                     '''Please install Stanford CoreNLP and put it at {}.
 
                     Direct URL: http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip
-                    Landing page: https://stanfordnlp.github.io/CoreNLP/''')
+                    Landing page: https://stanfordnlp.github.io/CoreNLP/'''.format(os.environ['CORENLP_HOME']))
             self._corenlp_client = corenlp.CoreNLPClient(
                 annotators="tokenize ssplit")
         return self._corenlp_client
