@@ -1,5 +1,6 @@
+import sys
+
 from setuptools import setup, find_packages
-from os import path
 
 setup(
     name='seq2struct',
@@ -18,7 +19,7 @@ setup(
         'numpy~=1.15.4',
         'pyrsistent~=0.14.9',
         'stanford-corenlp~=3.9.2',
-        'torch~=0.4.0',
+        'torch~=0.4.1' if not sys.platform.startswith('win') else 'torch @ https://download.pytorch.org/whl/cu90/torch-0.4.1-cp36-cp36m-win_amd64.whl',
         'torchtext~=0.3.1',
         'tqdm~=4.28.1',
     ],
