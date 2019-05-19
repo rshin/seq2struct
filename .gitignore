@@ -116,8 +116,15 @@ dmypy.json
 
 *.DS_Store
 
-# Project data
+
+### Project data ###
 
 .idea/
+.vscode/
 .vector_cache/
 third_party/stanford-corenlp-full-2018-10-05/
+
+### Logs & Experiment dirs ###
+
+logdirs/
+pt-exps/

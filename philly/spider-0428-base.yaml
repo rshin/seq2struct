@@ -1,0 +1,26 @@
+description: Spider baseline
+
+auth:
+  vc: msrlabs
+  cluster: wu2
+  docker:
+    image: pytorch/pytorch:0.4.1-cuda9-cudnn7-devel
+
+storage:
+  _default:
+    storage_account_name: polozovphillyblob
+    container_name: spider
+
+code:
+  local_dir: $CONFIG_DIR/../
+
+data:
+  local_dir: $CONFIG_DIR/../../Data/spider-20190205/
+  remote_dir: data/spider-20190205/
+
+jobs:
+  - name: spider-baseline-0428
+    sku: G1
+    command:
+      - philly/setup.sh
+      - philly/spider-0428-base.sh
