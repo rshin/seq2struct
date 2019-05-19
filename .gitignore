@@ -115,3 +115,9 @@ dmypy.json
 .pyre/
 
 *.DS_Store
+
+# Project data
+
+.idea/
+.vector_cache/
+third_party/stanford-corenlp-full-2018-10-05/
