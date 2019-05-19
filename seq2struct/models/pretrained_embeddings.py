@@ -47,7 +47,8 @@ class Embedder(metaclass=abc.ABCMeta):
 class GloVe(Embedder):
 
     def __init__(self, kind):
-        self.glove = torchtext.vocab.GloVe(name=kind)
+        cache = os.path.join(os.environ.get('PT_DATA_DIR', os.getcwd()), '.vector_cache')
+        self.glove = torchtext.vocab.GloVe(name=kind, cache=cache)
         self._corenlp_client = None
         self.dim = self.glove.dim
         self.vectors = self.glove.vectors
@@ -55,10 +56,11 @@ class GloVe(Embedder):
     @property
     def corenlp_client(self):
         if self._corenlp_client is None:
-            os.environ['CORENLP_HOME'] = os.path.abspath(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    '../../third_party/stanford-corenlp-full-2018-10-05'))
+            if not os.environ.get('CORENLP_HOME'):
+                os.environ['CORENLP_HOME'] = os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        '../../third_party/stanford-corenlp-full-2018-10-05'))
             if not os.path.exists(os.environ['CORENLP_HOME']):
                 raise Exception(
                     '''Please install Stanford CoreNLP and put it at {}.

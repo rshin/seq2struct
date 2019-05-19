@@ -8,6 +8,7 @@ import torch
 import torchtext
 
 from seq2struct.models import abstract_preproc
+
 try:
     from seq2struct.models import lstm
 except ImportError:
@@ -109,7 +110,7 @@ class SpiderEncoder(torch.nn.Module):
     def __init__(
             self,
             device,
-            preproc,
+            preproc: Preproc,
             word_emb_type='random',
             word_emb_size=128,
             recurrent_size=256,
@@ -125,11 +126,12 @@ class SpiderEncoder(torch.nn.Module):
 
         if word_emb_type == 'random':
             self.embedding = torch.nn.Embedding(
-                    num_embeddings=len(self.vocab),
-                    embedding_dim=self.word_emb_size)
+                num_embeddings=len(self.vocab),
+                embedding_dim=self.word_emb_size)
             self._embed_words = self._embed_words_learned
         elif word_emb_type == 'glove.42B-fixed':
-            self.embedding = torchtext.vocab.GloVe(name='42B')
+            cache = os.path.join(os.environ.get('PT_DATA_DIR', os.getcwd()), '.vector_cache')
+            self.embedding = torchtext.vocab.GloVe(name='42B', cache=cache)
             assert word_emb_size == self.embedding.dim
             self._embed_words = self._embed_words_fixed
 
@@ -138,7 +140,7 @@ class SpiderEncoder(torch.nn.Module):
                 hidden_size=self.recurrent_size // 2,
                 bidirectional=True,
                 dropout=dropout)
-                
+
         self.column_name_encoder = lstm.LSTM(
                 input_size=self.word_emb_size,
                 hidden_size=self.recurrent_size // 2,

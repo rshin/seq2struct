@@ -15,12 +15,11 @@ code:
   local_dir: $CONFIG_DIR/../
 
 data:
-  local_dir: $CONFIG_DIR/../../Data/spider-20190205/
-  remote_dir: data/spider-20190205/
+  local_dir: $CONFIG_DIR/../../Data
+  remote_dir: data
 
 jobs:
   - name: spider-baseline-0428
     sku: G1
     command:
-      - philly/setup.sh
       - philly/spider-0428-base.sh
