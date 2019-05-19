@@ -12,8 +12,9 @@ TreeNode = collections.namedtuple('TreeNode', ['name', 'refs', 'children'])
 
 class IdiomPreproc(abstract_preproc.AbstractPreproc):
 
-    def __init__(self, grammar, save_path):
+    def __init__(self, grammar, save_path, censor_pointers):
         self.save_path = save_path
+        self.censor_pointers = censor_pointers
         self.grammar = registry.construct('grammar', grammar)
         self.ast_wrapper = self.grammar.ast_wrapper
 
@@ -27,7 +28,8 @@ class IdiomPreproc(abstract_preproc.AbstractPreproc):
         return section != 'train', None
 
     def add_item(self, item, section, validation_info):
-        converted = AstConverter(self.grammar).convert(validation_info)
+        converted = AstConverter(self.grammar, self.censor_pointers).convert(
+            validation_info)
         self.items[section].append({
             'text': item.text,
             'ast': converted,
@@ -83,14 +85,14 @@ class IdiomPreproc(abstract_preproc.AbstractPreproc):
 
 
 class AstConverter:
-    def __init__(self, grammar):
+    def __init__(self, grammar, censor_pointers):
         self.grammar = grammar
         self.ast_wrapper = grammar.ast_wrapper
         self.symbols = {}
 
         self.split_constants = False
         self.preserve_terminal_types = True
-        self.censor_pointers = True
+        self.censor_pointers = censor_pointers
 
     def convert(self, node):
         if not isinstance(node, dict):

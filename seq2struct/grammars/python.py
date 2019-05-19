@@ -52,6 +52,8 @@ class PythonGrammar:
 
     root_type = 'Module'
 
+    pointers = set()
+
     @classmethod
     def parse(cls, code, section):
         try:
