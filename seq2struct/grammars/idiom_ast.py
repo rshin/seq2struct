@@ -30,16 +30,15 @@ class SeqField:
 @registry.register('grammar', 'idiom_ast')
 class IdiomAstGrammar:
 
-    pointers = {}
-
     def __init__(self, base_grammar, template_file, root_type=None,
         all_sections_rewritten=False):
         self.base_grammar = registry.construct('grammar', base_grammar)
         self.templates = json.load(open(template_file))
         self.all_sections_rewritten = all_sections_rewritten
 
-        self.ast_wrapper = self.base_grammar.ast_wrapper
-        self.base_ast_wrapper = copy.deepcopy(self.ast_wrapper)
+        self.pointers = self.base_grammar.pointers
+        self.ast_wrapper = copy.deepcopy(self.base_grammar.ast_wrapper)
+        self.base_ast_wrapper = self.base_grammar.ast_wrapper
         self.root_type = self.base_grammar.root_type
         if base_grammar['name'] == 'python':
             self.root_type = 'mod'
