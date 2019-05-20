@@ -1,6 +1,7 @@
 """Tools to save/restore model from checkpoints."""
 
 import argparse
+import shutil
 import sys
 import os
 import re
@@ -60,22 +61,26 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
             for item in ignore:
                 if key.startswith(item):
                     state_dict.pop(key)
+    actual_checkpoint = '{}-{}'.format(path, step_padded)
     torch.save({
         'model': state_dict,
         'optimizer': optimizer.state_dict(),
         'step': step
-    }, '{}-{}'.format(path, step_padded))
+    }, actual_checkpoint)
     if os.path.exists(path):
         os.unlink(path)
-    source = 'model_checkpoint-' + step_padded
-    os.symlink(source,  path)
+    try:
+        os.symlink(actual_checkpoint, path)
+    except OSError as e:
+        if "Function not implemented" not in e.strerror: raise
+        shutil.copy2(actual_checkpoint, path)
 
     # Cull old checkpoints.
     if keep_every_n is not None:
         all_checkpoints = []
         for name in os.listdir(model_dir):
             m = CHECKPOINT_PATTERN.match(name)
-            if m is None or name == source:
+            if m is None or name == os.path.basename(actual_checkpoint):
                 continue
             checkpoint_step = int(m.group(1))
             all_checkpoints.append((checkpoint_step, name))
