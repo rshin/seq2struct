@@ -14,8 +14,8 @@ class Hypothesis:
     score_history = attr.ib(factory=list)
 
 
-def beam_search(model, item, beam_size, max_steps, visualize_flag=False):
-    inference_state, next_choices = model.begin_inference(item)
+def beam_search(model, orig_item, preproc_item, beam_size, max_steps, visualize_flag=False):
+    inference_state, next_choices = model.begin_inference(orig_item, preproc_item)
     beam = [Hypothesis(inference_state, next_choices)]
     finished = []
 

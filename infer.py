@@ -84,12 +84,16 @@ def main():
 
     with torch.no_grad():
         if args.mode == 'infer':
-            data = registry.construct('dataset', config['data'][args.section])
+            orig_data = registry.construct('dataset', config['data'][args.section])
+            preproc_data = model_preproc.dataset(args.section)
             if args.limit:
-                sliced_data = itertools.islice(data, args.limit)
+                sliced_orig_data = itertools.islice(data, args.limit)
+                sliced_preproc_data = itertools.islice(data, args.limit)
             else:
-                sliced_data = data
-            infer(model, args.beam_size, args.output_history, sliced_data, output)
+                sliced_orig_data = orig_data
+                sliced_preproc_data = preproc_data
+            assert len(orig_data) == len(preproc_data)
+            infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output)
         elif args.mode == 'debug':
             data = model_preproc.dataset(args.section)
             if args.limit:
@@ -108,10 +112,12 @@ def main():
             visualize_attention(model, args.beam_size, args.output_history, sliced_data, output)
 
 
-def infer(model, beam_size, output_history, sliced_data, output):
-    for i, item in enumerate(tqdm.tqdm(sliced_data)):
+def infer(model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output):
+    for i, (orig_item, preproc_item) in enumerate(
+            tqdm.tqdm(zip(sliced_orig_data, sliced_preproc_data),
+                      total=len(sliced_orig_data))):
         beams = beam_search.beam_search(
-                model, item, beam_size=beam_size, max_steps=1000)
+                model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
 
         decoded = []
         for beam in beams:

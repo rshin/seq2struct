@@ -109,12 +109,14 @@ class EncDecModel(torch.nn.Module):
         result = {'loss': mean_loss * batch_size, 'total': batch_size}
         return result
 
-    def begin_inference(self, item):
-        # TODO: Don't hardcode train
-        valid, validation_info =  self.preproc.enc_preproc.validate_item(item, 'train')
-        if not valid:
-            return None
-        enc_input = self.preproc.enc_preproc.preprocess_item(item, validation_info)
+    def begin_inference(self, orig_item, preproc_item):
+        ## TODO: Don't hardcode train
+        #valid, validation_info =  self.preproc.enc_preproc.validate_item(item, 'train')
+        #if not valid:
+        #    return None
+        #enc_input = self.preproc.enc_preproc.preprocess_item(item, validation_info)
+
+        enc_input, _ = preproc_item
         if self.visualize_flag:
             print('question:')
             print(enc_input['question'])
@@ -126,4 +128,4 @@ class EncDecModel(torch.nn.Module):
             enc_state, = self.encoder([enc_input])
         else:
             enc_state = self.encoder(enc_input)
-        return self.decoder.begin_inference(enc_state, item)
+        return self.decoder.begin_inference(enc_state, orig_item)
