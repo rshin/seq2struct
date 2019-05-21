@@ -6,9 +6,9 @@ local _0428_base = import '../spider-20190205/nl2code-0428-base.libsonnet';
 local output_from = false;
 
 function(args) _0428_base(output_from=output_from) + {
-    local ORIG_PREFIX = 'data/spider-20190205/',
-    local PREFIX =
-    'data/spider-idioms/20190518/all-matches-trees-iter10-anysplit-att1/filt-none_st-%(st)s_nt-%(nt)d/' % args,
+    local ORIG_PREFIX = if 'data_path' in args then args.data_path else 'data/spider-20190205/',
+    local PREFIX = ORIG_PREFIX + 
+        '../spider-idioms/20190518/all-matches-trees-iter10-anysplit-att1/filt-none_st-%(st)s_nt-%(nt)d/' % args,
 
     model_name: 'filt-none_st-%(st)s_nt-%(nt)d' % args,
 

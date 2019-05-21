@@ -1,0 +1,38 @@
+description: Spider idioms -- search x4 (bs=10,50; st=examples,xent; nt=10,20)
+
+auth:
+  vc: msrlabs
+  cluster: wu2
+  docker:
+    image: pytorch/pytorch:0.4.1-cuda9-cudnn7-devel
+
+storage:
+  _default:
+    storage_account_name: polozovphillyblob
+    container_name: spider
+
+code:
+  local_dir: $CONFIG_DIR/../
+
+data:
+  local_dir: $CONFIG_DIR/../../Data
+  remote_dir: data
+
+search:
+  job_template:
+    name: spider-idioms-nofrom-0518_st-{st:s}_nt-{nt}_bs-{bs}
+    sku: G1
+    command:
+      - philly/spider-0518-idioms-sweep.sh --st "{st}" --nt {nt} --bs {bs}
+  type: grid
+  max_trials: 10
+  params:
+    - name: bs
+      spec: discrete
+      values: [10, 50]
+    - name: st
+      spec: discrete
+      values: ['cov-examples', 'cov-xent']
+    - name: nt
+      spec: discrete
+      values: [10, 20]
