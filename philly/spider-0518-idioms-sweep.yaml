@@ -1,4 +1,4 @@
-description: Spider idioms -- search x4 (bs=10,50; st=examples,xent; nt=10,20)
+description: Spider idioms -- search x16 (bs=10,50; st=examples,xent; nt=10,20,40,80)
 
 auth:
   vc: msrlabs
@@ -23,9 +23,9 @@ search:
     name: spider-idioms-nofrom-0518_st-{st:s}_nt-{nt}_bs-{bs}
     sku: G1
     command:
-      - philly/spider-0518-idioms-sweep.sh --st "{st}" --nt {nt} --bs {bs}
+      - philly/spider-0518-idioms-sweep.sh $EXTRA_ARGS --st "{st}" --nt {nt} --bs {bs}
   type: grid
-  max_trials: 10
+  max_trials: 16
   params:
     - name: bs
       spec: discrete
@@ -35,4 +35,4 @@ search:
       values: ['cov-examples', 'cov-xent']
     - name: nt
       spec: discrete
-      values: [10, 20]
+      values: [10, 20, 40, 80]
