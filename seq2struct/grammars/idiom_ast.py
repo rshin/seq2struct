@@ -166,7 +166,7 @@ class IdiomAstGrammar:
         if root_type is not None:
             if isinstance(root_type, (list, tuple)):
                 for choice in root_type:
-                    if (choice in self.ast_wrapper.singualr_types or
+                    if (choice in self.ast_wrapper.singular_types or
                         choice in self.ast_wrapper.sum_types):
                         self.root_type = choice
                         break
