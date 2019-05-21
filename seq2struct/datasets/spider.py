@@ -190,3 +190,4 @@ class SpiderIdiomAstDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         return self.examples[idx]
 
+    Metrics = SpiderDataset.Metrics
