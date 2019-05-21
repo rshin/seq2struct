@@ -46,7 +46,7 @@ function(args) _0428_base(output_from=output_from) + {
                 },
                 template_file: PREFIX + 'templates.json',
                 all_sections_rewritten: true,
-                root_type: 'sql_plus_templates',
+                root_type: ['sql_plus_templates', 'sql'],
             },
         },
     },

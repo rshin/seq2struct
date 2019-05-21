@@ -39,11 +39,10 @@ class IdiomAstGrammar:
         self.pointers = self.base_grammar.pointers
         self.ast_wrapper = copy.deepcopy(self.base_grammar.ast_wrapper)
         self.base_ast_wrapper = self.base_grammar.ast_wrapper
+        # TODO: Override root_type more intelligently
         self.root_type = self.base_grammar.root_type
         if base_grammar['name'] == 'python':
             self.root_type = 'mod'
-        if root_type is not None:
-            self.root_type = root_type
 
         singular_types_with_single_seq_field = set(
             name for name, type_info in self.ast_wrapper.singular_types.items()
@@ -164,6 +163,15 @@ class IdiomAstGrammar:
 
             self.templates_containing_placeholders[name] = constructor.template(hole_values)
 
+        if root_type is not None:
+            if isinstance(root_type, (list, tuple)):
+                for choice in root_type:
+                    if (choice in self.ast_wrapper.singualr_types or
+                        choice in self.ast_wrapper.sum_types):
+                        self.root_type = choice
+                        break
+            else:
+                self.root_type = root_type
 
     def parse(self, code, section):
         if self.all_sections_rewritten or section == 'train':
