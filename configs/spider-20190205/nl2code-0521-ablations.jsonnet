@@ -37,7 +37,7 @@ function(args) _0428_base(output_from=false) + {
 
     model+: {
         encoder+: {
-            batch_encs_update: false,
+            batch_encs_update: args.num_layers == 0,
             update_config: if args.num_layers == 0 then {
                 name: 'none',
             } else super.update_config + {
