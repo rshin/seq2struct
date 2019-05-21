@@ -49,8 +49,10 @@ def main():
 
     if 'model_name' in config:
         args.logdir = os.path.join(args.logdir, config['model_name'])
-    if os.path.exists(args.output):
-        print('Output file {} already exists'.format(args.output))
+
+    output_path = args.output.replace('__LOGDIR__', args.logdir)
+    if os.path.exists(output_path):
+        print('Output file {} already exists'.format(output_path))
         sys.exit(1)
 
     # 0. Construct preprocessors
@@ -74,7 +76,6 @@ def main():
         raise Exception('Attempting to infer on untrained model')
 
     # 3. Get training data somewhere
-    output_path = args.output.replace('__LOGDIR__', args.logdir)
     output = open(output_path, 'w')
     data = registry.construct('dataset', config['data'][args.section])
     if args.limit:
