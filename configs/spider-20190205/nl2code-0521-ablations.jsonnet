@@ -33,7 +33,7 @@ local enc_update_types = {
 };
 
 function(args) _0428_base(output_from=false) + {
-    model_name: 'glove=%(glove)s,upd_type=%(upd_type)s,num_layers=%(num_layers)d,att=%(att)d',
+    model_name: 'glove=%(glove)s,upd_type=%(upd_type)s,num_layers=%(num_layers)d,att=%(att)d' % args,
 
     model+: {
         encoder+: {
