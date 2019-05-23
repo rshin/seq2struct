@@ -51,7 +51,7 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
 
     output_path = args.output.replace('__LOGDIR__', args.logdir)
-    if os.path.exists(output_path):
+    if os.path.exists(output_path) and os.stat(output_path).st_size > 0:
         print('Output file {} already exists'.format(output_path))
         sys.exit(1)
 
