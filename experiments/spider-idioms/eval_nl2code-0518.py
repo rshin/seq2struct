@@ -1,6 +1,7 @@
 import itertools
 import json
 import os
+import sys
 from pathlib import Path
 
 import _jsonnet
@@ -20,7 +21,7 @@ def main():
             logdir = job / f"logdirs/20190519/filt-none_st-{st}_nt-{nt}"
             if not logdir.exists(): continue
             
-            steps = list(range(33000, 0, -100))
+            steps = list(range(36000, 0, -100))
             args = '{{st: \'{st}\', nt: {nt}, att: {att}}}'.format(
                 st=st,
                 nt=nt,
@@ -43,7 +44,7 @@ def main():
     
                 infer_command = ((
                     'python infer.py --config configs/spider-idioms/nl2code-0518.jsonnet '
-                    '--logdir logdirs/spider-idioms/nl2code-0518 '
+                    f'--logdir {logdir / ".."} '
                     '--config-args "{args}" '
                     '--output __LOGDIR__/infer-val-step{step:05d}-bs1.jsonl '
                     '--step {step} --section val --beam-size 1').format(
@@ -53,7 +54,7 @@ def main():
     
                 eval_command = ((
                     'python eval.py --config configs/spider-idioms/nl2code-0518.jsonnet '
-                    '--logdir logdirs/spider-idioms/nl2code-0518 '
+                    f'--logdir {logdir / ".."} '
                     '--config-args "{args}" '
                     '--inferred __LOGDIR__/infer-val-step{step:05d}-bs1.jsonl '
                     '--output __LOGDIR__/eval-val-step{step:05d}-bs1.jsonl '
