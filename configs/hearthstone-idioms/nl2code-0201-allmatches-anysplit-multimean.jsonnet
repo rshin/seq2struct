@@ -10,6 +10,10 @@ function(args) {
             name: 'idiom_ast', 
             path: PREFIX + 'dev.jsonl',
         },
+        test: {
+            name: 'idiom_ast', 
+            path: PREFIX + 'test.jsonl',
+        },
     },
 
     model: {

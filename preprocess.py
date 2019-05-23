@@ -26,10 +26,8 @@ def main():
         registry.lookup('model', config['model']).Preproc,
         config['model'])
 
-    train_data = registry.construct('dataset', config['data']['train'])
-    val_data = registry.construct('dataset', config['data']['val'])
-
-    for section, data in (('train', train_data), ('val', val_data)):
+    for section in config['data']:
+        data = registry.construct('dataset', config['data'][section])
         for item in tqdm.tqdm(data, desc=section, dynamic_ncols=True):
             to_add, validation_info = model_preproc.validate_item(item, section)
             if to_add:

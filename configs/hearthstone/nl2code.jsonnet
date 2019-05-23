@@ -9,6 +9,10 @@ local PREFIX = 'data/hearthstone/';
             name: 'hearthstone', 
             path: PREFIX + 'dev_hs',
         },
+        test: {
+            name: 'hearthstone', 
+            path: PREFIX + 'test_hs',
+        },
     },
 
     model: {
