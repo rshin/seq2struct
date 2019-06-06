@@ -71,8 +71,7 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
         os.unlink(path)
     try:
         os.symlink(actual_checkpoint, path)
-    except OSError as e:
-        if "Function not implemented" not in e.strerror: raise
+    except OSError:
         shutil.copy2(actual_checkpoint, path)
 
     # Cull old checkpoints.
