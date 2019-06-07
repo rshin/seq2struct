@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import json
 import os
@@ -6,8 +7,9 @@ import sys
 import _jsonnet
 
 def main():
-    all_commands = []
-    all_eval_commands = []
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--beam-size', type=int, default=1)
+    script_args = parser.parse_args()
 
     for (glove, upd_type, num_layers), att in itertools.product((
         (False, 'full', 4),
@@ -37,7 +39,7 @@ def main():
 
             if os.path.exists(os.path.join(
                 logdir,
-                'eval-val-step{:05d}-bs1.jsonl'.format(step))):
+                'eval-val-step{:05d}-bs{}.jsonl'.format(step, script_args.beam_size))):
                 continue
 
             infer_command = ((
@@ -45,21 +47,23 @@ def main():
                 '--config configs/spider-20190205/nl2code-0521-ablations.jsonnet '
                 '--logdir logdirs/20190521-ablations '
                 '--config-args "{args}" ' +
-                '--output __LOGDIR__/infer-val-step{step:05d}-bs1.jsonl ' +
-                '--step {step} --section val --beam-size 1').format(
+                '--output __LOGDIR__/infer-val-step{step:05d}-bs{beam_size}.jsonl ' +
+                '--step {step} --section val --beam-size {beam_size}').format(
                     args=args,
                     step=step,
+                    beam_size=script_args.beam_size,
                     ))
 
             eval_command = ((
                 'python eval.py --config configs/spider-20190205/nl2code-0521-ablations.jsonnet ' +
                 '--logdir logdirs/20190521-ablations ' +
                 '--config-args "{args}" ' +
-                '--inferred __LOGDIR__/infer-val-step{step:05d}-bs1.jsonl ' +
-                '--output __LOGDIR__/eval-val-step{step:05d}-bs1.jsonl ' +
+                '--inferred __LOGDIR__/infer-val-step{step:05d}-bs{beam_size}.jsonl ' +
+                '--output __LOGDIR__/eval-val-step{step:05d}-bs{beam_size}.jsonl ' +
                 '--section val').format(
                     args=args,
                     step=step,
+                    beam_size=script_args.beam_size,
                     ))
 
             print('{} && {}'.format(infer_command, eval_command))
