@@ -74,7 +74,7 @@ class PackedSequencePlus:
                 raise ValueError('Lengths are not descending: {}'.format(value))
     
     def __attrs_post_init__(self):
-        self.__dict__['cum_batch_sizes'] = np.cumsum([0] + self.ps.batch_sizes[:-1].tolist())
+        self.__dict__['cum_batch_sizes'] = np.cumsum([0] + self.ps.batch_sizes[:-1].tolist()).astype(np.int_)
 
     def apply(self, fn):
         return attr.evolve(self, ps=torch.nn.utils.rnn.PackedSequence(
