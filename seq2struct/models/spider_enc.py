@@ -130,7 +130,7 @@ class SpiderEncoder(torch.nn.Module):
                 embedding_dim=self.word_emb_size)
             self._embed_words = self._embed_words_learned
         elif word_emb_type == 'glove.42B-fixed':
-            cache = os.path.join(os.environ.get('PT_DATA_DIR', os.getcwd()), '.vector_cache')
+            cache = os.path.join(os.environ.get('CACHE_DIR', os.getcwd()), '.vector_cache')
             self.embedding = torchtext.vocab.GloVe(name='42B', cache=cache)
             assert word_emb_size == self.embedding.dim
             self._embed_words = self._embed_words_fixed
