@@ -27,6 +27,11 @@ class AbstractPreproc(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
+    def clear_items(self):
+        '''Clear the preprocessed items'''
+        pass
+
+    @abc.abstractmethod
     def save(self):
         '''Marks that all of the items have been preprocessed. Save state to disk.
 

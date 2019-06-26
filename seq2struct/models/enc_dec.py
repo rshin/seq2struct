@@ -44,6 +44,10 @@ class EncDecModel(torch.nn.Module):
             self.enc_preproc.add_item(item, section, enc_info)
             self.dec_preproc.add_item(item, section, dec_info)
         
+        def clear_items(self):
+            self.enc_preproc.clear_items()
+            self.dec_preproc.clear_items()
+
         def save(self):
             self.enc_preproc.save()
             self.dec_preproc.save()

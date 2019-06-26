@@ -37,10 +37,13 @@ class NL2CodeEncoder(torch.nn.Module):
             self.data_dir = os.path.join(save_path, 'enc')
 
             self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+            self.init_items()
+            self.vocab = None
+        
+        def init_items(self):
             # TODO: Write 'train', 'val', 'test' somewhere else
             self.texts = {'train': [], 'val': [], 'test': []}
 
-            self.vocab = None
 
         def validate_item(self, item, section):
             return True, None
@@ -50,6 +53,9 @@ class NL2CodeEncoder(torch.nn.Module):
                 for token in item.text:
                     self.vocab_builder.add_word(token)
             self.texts[section].append(item.text)
+
+        def clear_items(self):
+            self.init_items()
 
         def preprocess_item(self, item, validation_info):
             return item.text

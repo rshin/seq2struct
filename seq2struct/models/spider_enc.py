@@ -64,14 +64,17 @@ class SpiderEncoderV2Preproc(abstract_preproc.AbstractPreproc):
         self.data_dir = os.path.join(save_path, 'enc')
         self.include_table_name_in_column = include_table_name_in_column
         self.count_tokens_in_word_emb_for_vocab = count_tokens_in_word_emb_for_vocab
-        # TODO: Write 'train', 'val', 'test' somewhere else
-        self.texts = {'train': [], 'val': [], 'test': []}
+        self.init_texts()
 
         self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
         self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
         self.vocab = None
         self.counted_db_ids = set()
         self.preprocessed_schemas = {}
+
+    def init_texts(self):
+        # TODO: Write 'train', 'val', 'test' somewhere else
+        self.texts = {'train': [], 'val': [], 'test': []}
 
     def validate_item(self, item, section):
         return True, None
@@ -97,6 +100,9 @@ class SpiderEncoderV2Preproc(abstract_preproc.AbstractPreproc):
                     self.word_emb.lookup(token) is None)
                 if count_token:
                     self.vocab_builder.add_word(token)
+
+    def clear_items(self):
+        self.init_texts()
 
     def preprocess_item(self, item, validation_info):
         if self.word_emb:

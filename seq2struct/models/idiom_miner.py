@@ -36,6 +36,9 @@ class IdiomPreproc(abstract_preproc.AbstractPreproc):
             'orig': item.orig,
         })
     
+    def clear_items(self):
+        self.items.clear()
+
     def save(self):
         os.makedirs(self.save_path, exist_ok=True)
         for section in self.items:
