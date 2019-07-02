@@ -6,17 +6,22 @@ import os
 
 import _jsonnet
 import attr
-import asdl
 import torch
 
+# noinspection PyUnresolvedReferences
 from seq2struct import ast_util
+# noinspection PyUnresolvedReferences
 from seq2struct import datasets
+# noinspection PyUnresolvedReferences
 from seq2struct import models
+# noinspection PyUnresolvedReferences
 from seq2struct import optimizers
 
 from seq2struct.utils import registry
 from seq2struct.utils import random_state
 from seq2struct.utils import saver as saver_mod
+
+# noinspection PyUnresolvedReferences
 from seq2struct.utils import vocab
 
 
@@ -44,8 +49,9 @@ class TrainConfig:
 
 
 class Logger:
-    def __init__(self, log_path=None):
+    def __init__(self, log_path=None, reopen_to_flush=False):
         self.log_file = None
+        self.reopen_to_flush = reopen_to_flush
         if log_path is not None:
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             self.log_file = open(log_path, 'a+')
@@ -57,7 +63,12 @@ class Logger:
         print(formatted)
         if self.log_file:
             self.log_file.write(formatted + '\n')
-            self.log_file.flush()
+            if self.reopen_to_flush:
+                log_path = self.log_file.name
+                self.log_file.close()
+                self.log_file = open(log_path, 'a+')
+            else:
+                self.log_file.flush()
 
 
 def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
@@ -110,7 +121,8 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
     train_config = registry.instantiate(TrainConfig, config['train'])
 
-    logger = Logger(os.path.join(args.logdir, 'log.txt'))
+    reopen_to_flush = config.get('log', {}).get('reopen_to_flush')
+    logger = Logger(os.path.join(args.logdir, 'log.txt'), reopen_to_flush)
     with open(os.path.join(args.logdir,
           'config-{}.json'.format(
             datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
