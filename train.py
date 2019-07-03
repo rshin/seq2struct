@@ -70,35 +70,132 @@ class Logger:
             else:
                 self.log_file.flush()
 
+class Trainer:
+    def __init__(self, logger, config):
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
 
-def eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
-    stats = collections.defaultdict(float)
-    model.eval()
-    with torch.no_grad():
-      for eval_batch in eval_data_loader:
-          batch_res = model.eval_on_batch(eval_batch)
-          for k, v in batch_res.items():
-              stats[k] += v
-          if num_eval_items and stats['total'] > num_eval_items:
-              break
-    model.train()
+        self.logger = logger
+        self.train_config = registry.instantiate(TrainConfig, config['train'])
+        self.data_random = random_state.RandomContext(self.train_config.data_seed)
+        self.model_random = random_state.RandomContext(self.train_config.model_seed)
 
-    # Divide each stat by 'total'
-    for k in stats:
-        if k != 'total':
-            stats[k] /= stats['total']
-    if 'total' in stats:
-        del stats['total']
+        self.init_random = random_state.RandomContext(self.train_config.init_seed)
+        with self.init_random:
+            # 0. Construct preprocessors
+            self.model_preproc = registry.instantiate(
+                registry.lookup('model', config['model']).Preproc,
+                config['model'],
+                unused_keys=('name',))
+            self.model_preproc.load()
 
-    logger.log("Step {} stats, {}: {}".format(
-        last_step, eval_section, ", ".join(
-        "{} = {}".format(k, v) for k, v in stats.items())))
+            # 1. Construct model
+            self.model = registry.construct('model', config['model'],
+                    unused_keys=('encoder_preproc', 'decoder_preproc'), preproc=self.model_preproc, device=device)
+            self.model.to(device)
+
+    def train(self, config, modeldir):
+        # slight difference here vs. unrefactored train: The init_random starts over here. Could be fixed if it was important by saving random state at end of init
+        with self.init_random:
+            # We may be able to move optimizer and lr_scheduler to __init__ instead. Empirically it works fine. I think that's because saver.restore 
+            # resets the state by calling optimizer.load_state_dict. 
+            # But, if there is no saved file yet, I think this is not true, so might need to reset the optimizer manually?
+            # For now, just creating it from scratch each time is safer and appears to be the same speed, but also means you have to pass in the config to train which is kind of ugly.
+            optimizer = registry.construct('optimizer', config['optimizer'], params=self.model.parameters())
+            lr_scheduler = registry.construct(
+                    'lr_scheduler',
+                    config.get('lr_scheduler', {'name': 'noop'}),
+                    optimizer=optimizer)
+
+        # 2. Restore model parameters
+        saver = saver_mod.Saver(
+            self.model, optimizer, keep_every_n=self.train_config.keep_every_n)
+        last_step = saver.restore(modeldir)
+
+        # 3. Get training data somewhere
+        with self.data_random:
+            train_data = self.model_preproc.dataset('train')
+            train_data_loader = self.__yield_batches_from_epochs(
+                torch.utils.data.DataLoader(
+                    train_data,
+                    batch_size=self.train_config.batch_size,
+                    shuffle=True,
+                    drop_last=True,
+                    collate_fn=lambda x: x))
+        train_eval_data_loader = torch.utils.data.DataLoader(
+                train_data,
+                batch_size=self.train_config.eval_batch_size,
+                collate_fn=lambda x: x)
+
+        val_data = self.model_preproc.dataset('val')
+        val_data_loader = torch.utils.data.DataLoader(
+                val_data,
+                batch_size=self.train_config.eval_batch_size,
+                collate_fn=lambda x: x)
+
+        # 4. Start training loop
+        with self.data_random:
+            for batch in train_data_loader:
+                # Quit if too long
+                if last_step >= self.train_config.max_steps:
+                    break
+
+                # Evaluate model
+                if last_step % self.train_config.eval_every_n == 0:
+                    if self.train_config.eval_on_train:
+                        self.__eval_model(self.logger, self.model, last_step, train_eval_data_loader, 'train', num_eval_items=self.train_config.num_eval_items)
+                    if self.train_config.eval_on_val:
+                        self.__eval_model(self.logger, self.model, last_step, val_data_loader, 'val', num_eval_items=self.train_config.num_eval_items)
+
+                # Compute and apply gradient
+                with self.model_random:
+                    optimizer.zero_grad()
+                    loss = self.model.compute_loss(batch)
+                    loss.backward()
+                    lr_scheduler.update_lr(last_step)
+                    optimizer.step()
+
+                # Report metrics
+                if last_step % self.train_config.report_every_n == 0:
+                    self.logger.log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
+
+                last_step += 1
+                # Run saver
+                if last_step % self.train_config.save_every_n == 0:
+                    saver.save(modeldir, last_step)
 
 
-def yield_batches_from_epochs(loader):
-    while True:
-        for batch in loader:
-            yield batch
+    @staticmethod
+    def __yield_batches_from_epochs(loader):
+        while True:
+            for batch in loader:
+                yield batch
+    
+    @staticmethod
+    def __eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
+        stats = collections.defaultdict(float)
+        model.eval()
+        with torch.no_grad():
+          for eval_batch in eval_data_loader:
+              batch_res = model.eval_on_batch(eval_batch)
+              for k, v in batch_res.items():
+                  stats[k] += v
+              if num_eval_items and stats['total'] > num_eval_items:
+                  break
+        model.train()
+
+        # Divide each stat by 'total'
+        for k in stats:
+            if k != 'total':
+                stats[k] /= stats['total']
+        if 'total' in stats:
+            del stats['total']
+
+        logger.log("Step {} stats, {}: {}".format(
+            last_step, eval_section, ", ".join(
+            "{} = {}".format(k, v) for k, v in stats.items())))
 
 
 def main():
@@ -108,10 +205,6 @@ def main():
     parser.add_argument('--config-args')
     args = parser.parse_args()
 
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
     if args.config_args:
         config = json.loads(_jsonnet.evaluate_file(args.config, tla_codes={'args': args.config_args}))
     else:
@@ -119,96 +212,21 @@ def main():
 
     if 'model_name' in config:
         args.logdir = os.path.join(args.logdir, config['model_name'])
-    train_config = registry.instantiate(TrainConfig, config['train'])
 
+    # Save the config info
     reopen_to_flush = config.get('log', {}).get('reopen_to_flush')
-    logger = Logger(os.path.join(args.logdir, 'log.txt'), reopen_to_flush)
     with open(os.path.join(args.logdir,
-          'config-{}.json'.format(
+            'config-{}.json'.format(
             datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
         json.dump(config, f, sort_keys=True, indent=4)
+
+    # Initialize the logger
+    logger = Logger(os.path.join(args.logdir, 'log.txt'), reopen_to_flush)
     logger.log('Logging to {}'.format(args.logdir))
 
-    init_random = random_state.RandomContext(train_config.init_seed)
-    data_random = random_state.RandomContext(train_config.data_seed)
-    model_random = random_state.RandomContext(train_config.model_seed)
-
-    with init_random:
-        # 0. Construct preprocessors
-        model_preproc = registry.instantiate(
-            registry.lookup('model', config['model']).Preproc,
-            config['model'],
-            unused_keys=('name',))
-        model_preproc.load()
-
-        # 1. Construct model
-        model = registry.construct('model', config['model'],
-                unused_keys=('encoder_preproc', 'decoder_preproc'), preproc=model_preproc, device=device)
-        model.to(device)
-
-        optimizer = registry.construct('optimizer', config['optimizer'], params=model.parameters())
-        lr_scheduler = registry.construct(
-                'lr_scheduler',
-                config.get('lr_scheduler', {'name': 'noop'}),
-                optimizer=optimizer)
-
-    # 2. Restore its parameters
-    saver = saver_mod.Saver(
-        model, optimizer, keep_every_n=train_config.keep_every_n)
-    last_step = saver.restore(args.logdir)
-
-    # 3. Get training data somewhere
-    with data_random:
-        train_data = model_preproc.dataset('train')
-        train_data_loader = yield_batches_from_epochs(
-            torch.utils.data.DataLoader(
-                train_data,
-                batch_size=train_config.batch_size,
-                shuffle=True,
-                drop_last=True,
-                collate_fn=lambda x: x))
-    train_eval_data_loader = torch.utils.data.DataLoader(
-            train_data,
-            batch_size=train_config.eval_batch_size,
-            collate_fn=lambda x: x)
-
-    val_data = model_preproc.dataset('val')
-    val_data_loader = torch.utils.data.DataLoader(
-            val_data,
-            batch_size=train_config.eval_batch_size,
-            collate_fn=lambda x: x)
-
-    # 4. Start training loop
-    with data_random:
-        for batch in train_data_loader:
-            # Quit if too long
-            if last_step >= train_config.max_steps:
-                break
-
-            # Evaluate model
-            if last_step % train_config.eval_every_n == 0:
-                if train_config.eval_on_train:
-                    eval_model(logger, model, last_step, train_eval_data_loader, 'train', num_eval_items=train_config.num_eval_items)
-                if train_config.eval_on_val:
-                    eval_model(logger, model, last_step, val_data_loader, 'val', num_eval_items=train_config.num_eval_items)
-
-            # Compute and apply gradient
-            with model_random:
-                optimizer.zero_grad()
-                loss = model.compute_loss(batch)
-                loss.backward()
-                lr_scheduler.update_lr(last_step)
-                optimizer.step()
-
-            # Report metrics
-            if last_step % train_config.report_every_n == 0:
-                logger.log('Step {}: loss={:.4f}'.format(last_step, loss.item()))
-
-            last_step += 1
-            # Run saver
-            if last_step % train_config.save_every_n == 0:
-                saver.save(args.logdir, last_step)
-
+    # Construct trainer and do training
+    trainer = Trainer(logger, config)
+    trainer.train(config, modeldir=args.logdir)
 
 if __name__ == '__main__':
     main()
