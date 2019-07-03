@@ -214,13 +214,13 @@ def main():
         args.logdir = os.path.join(args.logdir, config['model_name'])
 
     # Save the config info
-    reopen_to_flush = config.get('log', {}).get('reopen_to_flush')
     with open(os.path.join(args.logdir,
             'config-{}.json'.format(
             datetime.datetime.now().strftime('%Y%m%dT%H%M%S%Z'))), 'w') as f:
         json.dump(config, f, sort_keys=True, indent=4)
 
     # Initialize the logger
+    reopen_to_flush = config.get('log', {}).get('reopen_to_flush')
     logger = Logger(os.path.join(args.logdir, 'log.txt'), reopen_to_flush)
     logger.log('Logging to {}'.format(args.logdir))
 
