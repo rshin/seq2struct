@@ -15,12 +15,32 @@ from torch.nn.modules.rnn import RNNCellBase
 from torch.nn.utils.rnn import PackedSequence
 from torch.nn._functions.thnn import rnnFusedPointwise as fusedBackend
 
+from seq2struct import batching
+
 
 class DropoutCreator(nn.Module):
-    def __init__(self, device, batch_size, dropout=0.):
+
+    class BatchKey(batching.BatchKey):
+        @classmethod
+        def create(cls):
+            return cls()
+        
+        def _combine(self, items):
+            return torch.cat(list(items), dim=0)
+        
+        def _separate(self, combined):
+            return torch.split(combined, dim=0)
+
+        @property
+        def iterable_keys(self):
+            return [0, 1]
+
+    def __init__(self, device, batch_size, input_size, hidden_size, dropout=0.):
         super().__init__()
         self._device = device
         self.batch_size = batch_size
+        self.input_size = input_size
+        self.hidden_size = hidden_size
         self.dropout = dropout
 
     def forward(self):
@@ -28,12 +48,12 @@ class DropoutCreator(nn.Module):
             if self.training:
                 input_dropout_mask = torch.bernoulli(
                     torch.full(
-                        (batch_size, 4, self.input_size),
+                        (self.batch_size, 4, self.input_size),
                         1 - self.dropout,
                         device=self._device))
                 h_dropout_mask = torch.bernoulli(
                     torch.full(
-                        (batch_size, 4, self.input_size),
+                        (self.batch_size, 4, self.hidden_size),
                         1 - self.dropout,
                         device=self._device))
             else:
@@ -45,6 +65,11 @@ class DropoutCreator(nn.Module):
 
 
 class RecurrentDropoutLSTMCell(RNNCellBase):
+    class BatchKey(batching.torch_defaults.Concat):
+        @property
+        def iterable_keys(self):
+            return (0, 1)
+
     def __init__(self, input_size, hidden_size, dropout=0.):
         super(RecurrentDropoutLSTMCell, self).__init__()
         self.input_size = input_size
@@ -101,15 +126,13 @@ class RecurrentDropoutLSTMCell(RNNCellBase):
         else:
             self._input_dropout_mask = self._h_dropout_mask = [1.] * 4
 
-    def forward(self, input, hidden_state, input_dropout_mask=None, h_dropout_mask=None):
+    def forward(self, input, h_tm1, c_tm1, input_dropout_mask=None, h_dropout_mask=None):
         def get_mask_slice(mask, idx):
             if isinstance(mask, list): return mask[idx]
             else: return mask[idx][:input.size(0)]
         def get_mask_slice2(mask, idx):
             if isinstance(mask, list): return mask[idx]
             else: return mask[:, idx]
-
-        h_tm1, c_tm1 = hidden_state
 
         # if self._input_dropout_mask is None:
         #     self.set_dropout_masks(input.size(0))

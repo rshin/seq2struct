@@ -65,15 +65,17 @@ class EncDecModel(batching.BatchedModule):
                 'decoder', decoder, device=device, preproc=preproc.dec_preproc)
         self.decoder.visualize_flag = False
         
-        if getattr(self.encoder, 'batched', False):
-            self.compute_loss = self._compute_loss_enc_batched
-        else:
+        if batching.BatchingPolicy.active():
+            pass
+        elif getattr(self.encoder, 'batched', False):
             self.compute_loss = self._compute_loss_unbatched
+        else:
+            self.compute_loss = self._compute_loss_enc_batched
     
     def compute_loss_single(self, item):
         enc_input, dec_output = item
         enc_state = self.encoder(enc_input)
-        return self.decoder.compute_loss(dec_output, enc_state, debug=False)
+        return self.decoder.compute_loss(enc_input, dec_output, enc_state, debug=False)
 
     def _compute_loss_enc_batched(self, batch, debug=False):
         losses = []

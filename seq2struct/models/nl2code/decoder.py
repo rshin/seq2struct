@@ -28,6 +28,18 @@ from seq2struct.utils import vocab
 from seq2struct.utils import serialization
 
 
+@attr.s(frozen=True)
+class LSTMState:
+    h = attr.ib()
+    c = attr.ib()
+    input_dropout_mask = attr.ib()
+    h_dropout_mask = attr.ib()
+
+    def update(self, new_state):
+        h, c = new_state
+        return attr.evolve(self, h=h, c=c)
+
+
 def lstm_init(device, num_layers, hidden_size, *batch_sizes):
     init_size = batch_sizes + (hidden_size, )
     if num_layers is not None:
@@ -43,7 +55,7 @@ def maybe_stack(items, dim=None):
     elif len(to_stack) == 1:
         return to_stack[0].unsqueeze(dim)
     else:
-        return torch.stack(to_stack, dim)
+        return batching.batched_func(torch.stack)(to_stack, dim)
 
 
 def accumulate_logprobs(d, keys_and_logprobs):
@@ -52,8 +64,8 @@ def accumulate_logprobs(d, keys_and_logprobs):
         if existing is None:
             d[key] = logprob
         else:
-            d[key] = torch.logsumexp(
-                torch.stack((logprob, existing), dim=0),
+            d[key] = batching.batched_func(torch.logsumexp)(
+                batching.batched_func(torch.stack)((logprob, existing), dim=0),
                 dim=0)
 
 
@@ -280,8 +292,8 @@ class TreeState:
     parent_field_type = attr.ib()
 
 
-class LSTMStep(torch.nn.Module):
-    def __init__(self, device, )
+#class LSTMStep(torch.nn.Module):
+#    def __init__(self, device, )
 
 @registry.register('decoder', 'NL2Code')
 class NL2CodeDecoder(batching.BatchedModule):
@@ -333,9 +345,15 @@ class NL2CodeDecoder(batching.BatchedModule):
                     sorted(self.preproc.seq_lengths.keys()),
                     special_elems=())
 
-        self.state_update_dropout = lstm.DropoutCreator(self._device, batch_size=1, dropout=dropout)
+        lstm_input_size = self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size
+        self.state_update_dropout = lstm.DropoutCreator(
+                self._device,
+                input_size=lstm_input_size,
+                hidden_size=self.recurrent_size,
+                batch_size=1,
+                dropout=dropout)
         self.state_update = lstm.RecurrentDropoutLSTMCell(
-                input_size=self.rule_emb_size * 2 + self.enc_recurrent_size + self.recurrent_size + self.node_emb_size,
+                input_size=lstm_input_size,
                 hidden_size=self.recurrent_size,
                 dropout=dropout)
         self.attn_type = desc_attn
@@ -368,19 +386,23 @@ class NL2CodeDecoder(batching.BatchedModule):
             self.desc_attn = desc_attn
         self.sup_att = sup_att
 
-        self.rule_logits = torch.nn.Sequential(
+        self.rule_logits = batching.with_batch_key(
+            torch.nn.Sequential(
                 torch.nn.Linear(self.recurrent_size, self.rule_emb_size),
                 torch.nn.Tanh(),
-                torch.nn.Linear(self.rule_emb_size, len(self.rules_index)))
+                torch.nn.Linear(self.rule_emb_size, len(self.rules_index))),
+            batching.torch_defaults.Concat)
         self.rule_embedding = torch.nn.Embedding(
                 num_embeddings=len(self.rules_index),
                 embedding_dim=self.rule_emb_size)
 
         self.gen_logodds = torch.nn.Linear(self.recurrent_size, 1)
-        self.terminal_logits = torch.nn.Sequential(
+        self.terminal_logits = batching.with_batch_key(
+            torch.nn.Sequential(
                 torch.nn.Linear(self.recurrent_size, self.rule_emb_size),
                 torch.nn.Tanh(),
-                torch.nn.Linear(self.rule_emb_size, len(self.terminal_vocab)))
+                torch.nn.Linear(self.rule_emb_size, len(self.terminal_vocab))),
+            batching.torch_defaults.Concat)
         self.terminal_embedding = torch.nn.Embedding(
                 num_embeddings=len(self.terminal_vocab),
                 embedding_dim=self.rule_emb_size)
@@ -393,9 +415,9 @@ class NL2CodeDecoder(batching.BatchedModule):
             # TODO: Figure out how to get right sizes (query, key) to module
             self.copy_pointer = copy_pointer
         if multi_loss_type == 'logsumexp':
-            self.multi_loss_reduction = lambda logprobs: -torch.logsumexp(logprobs, dim=1)
+            self.multi_loss_reduction = lambda logprobs: -batching.batched_func(torch.logsumexp)(logprobs, dim=1)
         elif multi_loss_type == 'mean':
-            self.multi_loss_reduction = lambda logprobs: -torch.mean(logprobs, dim=1)
+            self.multi_loss_reduction = lambda logprobs: -batching.batched_func(torch.mean)(logprobs, dim=1)
         
         self.pointers = torch.nn.ModuleDict()
         self.pointer_action_emb_proj = torch.nn.ModuleDict()
@@ -570,10 +592,11 @@ class NL2CodeDecoder(batching.BatchedModule):
         return traversal, choices
 
     def _desc_attention(self, prev_state, desc_enc):
-        # prev_state shape:
-        # - h_n: batch (=1) x emb_size
-        # - c_n: batch (=1) x emb_size
-        query = prev_state[0]
+        # prev_state: LSTMState
+        # shape:
+        # - h: batch (=1) x emb_size
+        # - c: batch (=1) x emb_size
+        query = prev_state.h
         if self.attn_type != 'sep':
             return self.desc_attn(query, desc_enc.memory, attn_mask=None)
         else:
@@ -604,7 +627,7 @@ class NL2CodeDecoder(batching.BatchedModule):
         node_type_emb = self.node_type_embedding(
                 self._index(self.node_type_vocab, node_type))
 
-        state_input = torch.cat(
+        state_input = batching.batched_func(torch.cat)(
             (
                 prev_action_emb,  # a_{t-1}: rule_emb_size
                 desc_context,  # c_t: enc_recurrent_size
@@ -615,8 +638,11 @@ class NL2CodeDecoder(batching.BatchedModule):
             dim=-1)
         new_state = self.state_update(
                 # state_input shape: batch (=1) x (emb_size * 5)
-                state_input, prev_state)
-        return new_state, attention_logits
+                state_input,
+                prev_state.h, prev_state.c,
+                prev_state.input_dropout_mask,
+                prev_state.h_dropout_mask)
+        return prev_state.update(new_state), attention_logits
 
     def apply_rule(
             self,
@@ -629,7 +655,7 @@ class NL2CodeDecoder(batching.BatchedModule):
         new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
-        output = new_state[0]
+        output = new_state.h
         # rule_logits shape: batch (=1) x num choices
         rule_logits = self.rule_logits(output)
 
@@ -655,7 +681,7 @@ class NL2CodeDecoder(batching.BatchedModule):
         new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
-        output = new_state[0]
+        output = new_state.h
 
         # gen_logodds shape: batch (=1)
         gen_logodds = self.gen_logodds(output).squeeze(1)
@@ -686,7 +712,8 @@ class NL2CodeDecoder(batching.BatchedModule):
             copy_logprob = (
                 # log p(copy | output)
                 # shape: batch (=1)
-                torch.nn.functional.logsigmoid(-gen_logodds) -
+                batching.batched_func(torch.nn.functional.logsigmoid)(
+                        -batching.batched_value(gen_logodds)) -
                 # xent_loss: -log p(location | output)
                 # TODO: sum the probability of all occurrences
                 # shape: batch (=1)
@@ -701,7 +728,8 @@ class NL2CodeDecoder(batching.BatchedModule):
             gen_logprob = (
                 # log p(gen | output)
                 # shape: batch (=1)
-                torch.nn.functional.logsigmoid(gen_logodds) -
+                batching.batched_func(torch.nn.functional.logsigmoid)(
+                        -batching.batched_value(gen_logodds)) -
                 # xent_loss: -log p(token | output)
                 # shape: batch (=1)
                 self.xent_loss(token_logits, token_idx))
@@ -709,7 +737,7 @@ class NL2CodeDecoder(batching.BatchedModule):
             gen_logprob = None
 
         # loss should be -log p(...), so negate
-        loss_piece = -torch.logsumexp(
+        loss_piece = -batching.batched_func(torch.logsumexp)(
             maybe_stack([copy_logprob, gen_logprob], dim=1),
             dim=1)
         return loss_piece
@@ -762,7 +790,7 @@ class NL2CodeDecoder(batching.BatchedModule):
         new_state, attention_logits = self._update_state(
             node_type, prev_state, prev_action_emb, parent_h, parent_action_emb, desc_enc)
         # output shape: batch (=1) x emb_size
-        output = new_state[0]
+        output = new_state.h
         # pointer_logits shape: batch (=1) x num choices
         pointer_logits = self.pointers[node_type](
             output, desc_enc.pointer_memories[node_type])
@@ -889,8 +917,9 @@ class TreeTraversal:
         self.model = model
         self.desc_enc = desc_enc
 
-        self.dropout_mask = model.state_update_dropout()
-        self.recurrent_state = lstm_init(model._device, None, self.model.recurrent_size, 1)
+        self.recurrent_state = LSTMState(
+            *lstm_init(model._device, None, self.model.recurrent_size, 1),
+            *model.state_update_dropout())
         self.prev_action_emb = model.zero_rule_emb
 
         root_type = model.preproc.grammar.root_type 

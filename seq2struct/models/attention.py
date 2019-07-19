@@ -18,17 +18,49 @@ def maybe_mask(attn, attn_mask):
         attn.data.masked_fill_(attn_mask, -float('inf'))
 
 
-@attr.s(frozen=True)
 class AttentionBatchKey(batching.BatchKey):
-    ref_path = attr.ib()
+
+    @classmethod
+    def create(cls, query, values, attn_mask=None):
+        return cls()
 
     @property
     def iterable_keys(self):
         return [0, 1]
 
-    def call_batched(self, existing_results, callable, query, values, attn_mask=None):
-        # query: list of tensors with shape [1, query_size]
-        # values: list of tensors with shape [1, num values, value_size]
+    def call_batched(self, existing_results, callable, callable_ref, invocations):
+        kwargs = self._regroup_invocations_with_signature(callable_ref.signature, invocations)
+        query, keys, attn_mask = kwargs['query'], kwargs['keys'], kwargs['attn_mask']
+
+        batch_size = len(query)
+        num_keys = [v.shape[1] for v in keys]
+        max_num_keys = max(v.shape[1] for v in keys)
+
+        batched_query = torch.cat(query, dim=0)
+        batched_keys = keys[0].new(
+            batch_size, max_num_keys, keys[0].shape[2]).fill_(0)
+        for i, v in enumerate(keys):
+            batched_keys[i:i+1] = v
+        
+        # TODO: Handle other cases later
+        assert attn_mask is None or all(m is None for m in attn_mask)
+        ranges = torch.arange(0, max_num_keys).unsqueeze(0).expand(batch_size, -1)
+        attn_mask = (ranges >= torch.tensor(num_keys).unsqueeze(1)).to(keys[0].device)
+
+        attn = callable(query, keys, attn_mask)
+        return torch.split(attn, dim=0)
+
+
+class PointerBatchKey(batching.BatchKey):
+
+    @classmethod
+    def create(cls, query, keys, attn_mask=None):
+        return cls()
+
+    def call_batched(self, existing_results, callable, callable_ref, invocations):
+        kwargs = self._regroup_invocations_with_signature(callable_ref.signature, invocations)
+        query, values, attn_mask = kwargs['query'], kwargs['values'], kwargs['attn_mask']
+
         batch_size = len(query)
         num_values = [v.shape[1] for v in values]
         max_num_values = max(v.shape[1] for v in values)
@@ -44,17 +76,13 @@ class AttentionBatchKey(batching.BatchKey):
         ranges = torch.arange(0, max_num_values).unsqueeze(0).expand(batch_size, -1)
         attn_mask = (ranges >= torch.tensor(num_values).unsqueeze(1)).to(values[0].device)
 
-        output, attn = callable(query, values, attn_mask)
-        return torch.split(output, dim=0), torch.split(attn, dim=0)
-    
+        attn = callable(query, values, attn_mask)
+        return torch.split(attn, dim=0)
 
 
 class Attention(torch.nn.Module):
 
-    class BatchCollator(batching.BatchCollator):
-        @classmethod
-        def batch_key(cls, orig_type, ref_path, query, values, attn_mask=None):
-            return AttentionBatchKey(ref_path=ref_path)
+    BatchKey = AttentionBatchKey
 
     def __init__(self, pointer):
         super().__init__()
@@ -77,6 +105,9 @@ class Attention(torch.nn.Module):
 
 @registry.register('pointer', 'sdp')
 class ScaledDotProductPointer(torch.nn.Module):
+
+    BatchKey = PointerBatchKey
+
     def __init__(self, query_size, key_size):
         super().__init__()
         self.query_proj = torch.nn.Linear(query_size, key_size)
@@ -103,6 +134,9 @@ class ScaledDotProductAttention(Attention):
 
 @registry.register('pointer', 'bahdanau')
 class BahdanauPointer(torch.nn.Module):
+
+    BatchKey = PointerBatchKey
+
     def __init__(self, query_size, key_size, proj_size):
         super().__init__()
         self.compute_scores = torch.nn.Sequential(
@@ -137,7 +171,7 @@ class BahdanauAttention(Attention):
 # Adapted from The Annotated Transformers
 class MultiHeadedAttention(torch.nn.Module):
 
-    BatchCollator = Attention.BatchCollator
+    BatchKey = AttentionBatchKey
 
     def __init__(self, h, query_size, value_size, dropout=0.1):
         super().__init__()

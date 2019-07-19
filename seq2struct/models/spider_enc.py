@@ -227,28 +227,20 @@ class SpiderEncoder(torch.nn.Module):
         return None
 
 
-@attr.s
-class SpiderEncoderV2BatchKey(batching.BatchKey):
-
-    ref_path = attr.ib()
-
-    def _combine(self, items):
-        return list(items)
-    
-    def _separate(self, combined):
-        return combined
-
-
 @registry.register('encoder', 'spiderv2')
-class SpiderEncoderV2(torch.nn.Module):
+class SpiderEncoderV2(batching.BatcheModule):
 
     batched = True
-    class BatchCollator(batching.BatchCollator):
-
-        @classmethod
-        def batch_key(cls, orig_type, ref_path, *args, **kwargs):
-            return SpiderEncoderV2BatchKey(ref_path)
-        
+#    class BatchKey(batching.BatchKey):
+#        @classmethod
+#        def create(cls, *args, **kwargs):
+#            return cls()
+#
+#        def _combine(self, items):
+#            return list(items)
+#        
+#        def _separate(self, combined):
+#            return combined
 
     class Preproc(abstract_preproc.AbstractPreproc):
         def __init__(

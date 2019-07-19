@@ -148,6 +148,7 @@ class BPEmb(Embedder):
     def requires_training(self):
         return False
 
+
 @registry.register('word_emb', 'sentencepiece')
 class SentencePiece(Embedder):
     def __init__(self, save_prefix):
