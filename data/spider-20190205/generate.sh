@@ -30,7 +30,7 @@ for input in train_others train_spider dev; do
 done
 
 # Create augmented data
-SYNTAXSQL_BASE=$(realpath ${BASE}/../../third_party/syntaxSQL)
-echo "Generating augmented data..."
-python ${SYNTAXSQL_BASE}/generate_wikisql_augment.py --output ${BASE}/train_wikisql_augment.json
-cp ${SYNTAXSQL_BASE}/data_augment/wikisql_tables.json ${BASE}/tables_wikisql_augment.json
+#SYNTAXSQL_BASE=$(realpath ${BASE}/../../third_party/syntaxSQL)
+#echo "Generating augmented data..."
+#python ${SYNTAXSQL_BASE}/generate_wikisql_augment.py --output ${BASE}/train_wikisql_augment.json
+#cp ${SYNTAXSQL_BASE}/data_augment/wikisql_tables.json ${BASE}/tables_wikisql_augment.json

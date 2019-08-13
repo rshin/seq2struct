@@ -1,12 +1,21 @@
-To set up:
+# Setup
+This repository requires Python 3.5 or greater.
+
+Example instructions to set up:
 ```
-virtualenv -p python3 /path/to/venv # Requires Python 3
-git clone ...
+virtualenv -p python3 /path/to/venv
+git clone https://github.com/rshin/seq2struct
 cd seq2struct
 pip install -e .
 ```
 
-To set up the data:
+# Dependencies
+Required Python modules are specified in `requirements.txt`. This project currently uses PyTorch 0.4.
+
+To train models for Spider, you also need the JVM to run Stanford CoreNLP (currently used for tokenization for GloVe embeddings).
+
+# [Spider dataset](https://yale-lily.github.io/spider)
+To obtain the results in https://arxiv.org/abs/1906.11790, first download the Spider dataset and preprocess it:
 - Download “Spider Dataset” from https://yale-lily.github.io/spider. You can use this bash function:
 ```
 function gdrive_download () {
@@ -19,21 +28,31 @@ function gdrive_download () {
 like `gdrive_download 11icoH_EA-NYb0OrPTdehRWm_d7-DIzWX`
 - Unzip it somewhere
 - Run `bash data/spider-20190206/generate.sh /path/to/unzipped/spider`
-- Run `python preprocess.py --config configs/spider-20190205/nl2code-0220.jsonnet --config-args "{output_from: false, qenc: 'eb', ctenc: 'ebs', upd_steps: 4, max_steps: 40000, batch_size: 10}"`
+- Run `python preprocess.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet`
+
+Install Stanford CoreNLP:
+- Download http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip
+- Unzip it to `third_party/stanford-corenlp-full-2018-10-05`
 
 To train the model:
-`python train.py --config configs/spider-20190205/nl2code-0220.jsonnet --config-args "{output_from: false, qenc: 'eb', ctenc: 'ebs', upd_steps: 4, max_steps: 40000, batch_size: 10}" --logdir ../logs`
-This should create a directory `../logs/output_from=false,qenc=eb,ctenc=ebs,upd_steps=4,max_steps=40000,batch_size=10/`.
+```
+python train.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet --logdir ../logs/arxiv-1906.11790v1
+```
+This should create a directory `../logs/arxiv-1906.11790v1`.
 
 To perform inference:
-`python infer.py --config configs/spider-20190205/nl2code-0220.jsonnet --config-args "{output_from: false, qenc: 'eb', ctenc: 'ebs', upd_steps: 4, max_steps: 40000, batch_size: 10}" --logdir ../logs/ --step <STEP NUMBER> --section val --beam-size 1 --output <PATH FOR INFERENCE OUTPUT>`
+```
+python infer.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet --logdir ../logs/arxiv-1906.11790v1 --step <STEP NUMBER> --section val --beam-size 1 --output <PATH FOR INFERENCE OUTPUT>
+```
 
 To perform evaluation:
-`python eval.py --config configs/spider-20190205/nl2code-0220.jsonnet --config-args "{output_from: false, qenc: 'eb', ctenc: 'ebs', upd_steps: 4, max_steps: 40000, batch_size: 10}" --inferred <PATH FOR INFERENCE OUTPUT> --output <PATH FOR EVAL OUTPUT> --section val`
+```
+python eval.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet --inferred <PATH FOR INFERENCE OUTPUT> --output <PATH FOR EVAL OUTPUT> --section val
+```
 
 To look at evaluation results:
 ```
 >>> import json
 >>> d = json.load(open('<PATH FOR EVAL OUTPUT>')) 
->>> print(d['total_scores']['all']['exact']) # should be in 0.20-0.27
+>>> print(d['total_scores']['all']['exact']) # should be ~0.42
 ```
