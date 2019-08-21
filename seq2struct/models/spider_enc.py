@@ -34,145 +34,172 @@ class SpiderEncoderState:
         return [i for i, w in enumerate(self.words) if w == word]
 
 
+@attr.s
+class PreprocessedSchema:
+    column_names = attr.ib(factory=list)
+    table_names = attr.ib(factory=list)
+    table_bounds = attr.ib(factory=list)
+    column_to_table = attr.ib(factory=dict)
+    table_to_columns = attr.ib(factory=dict)
+    foreign_keys = attr.ib(factory=dict)
+    foreign_keys_tables = attr.ib(factory=lambda: collections.defaultdict(set))
+    primary_keys = attr.ib(factory=list)
+
+
+class SpiderEncoderV2Preproc(abstract_preproc.AbstractPreproc):
+
+    def __init__(
+            self,
+            save_path,
+            min_freq=3,
+            max_count=5000,
+            include_table_name_in_column=True,
+            word_emb=None,
+            count_tokens_in_word_emb_for_vocab=False):
+        if word_emb is None:
+            self.word_emb = None
+        else:
+            self.word_emb = registry.construct('word_emb', word_emb)
+
+        self.data_dir = os.path.join(save_path, 'enc')
+        self.include_table_name_in_column = include_table_name_in_column
+        self.count_tokens_in_word_emb_for_vocab = count_tokens_in_word_emb_for_vocab
+        # TODO: Write 'train', 'val', 'test' somewhere else
+        self.texts = {'train': [], 'val': [], 'test': []}
+
+        self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+        self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
+        self.vocab = None
+        self.counted_db_ids = set()
+        self.preprocessed_schemas = {}
+
+    def validate_item(self, item, section):
+        return True, None
+ 
+    def add_item(self, item, section, validation_info):
+        preprocessed = self.preprocess_item(item, validation_info)
+        self.texts[section].append(preprocessed)
+
+        if section == 'train':
+            if item.schema.db_id in self.counted_db_ids:
+                to_count = preprocessed['question']
+            else:
+                self.counted_db_ids.add(item.schema.db_id)
+                to_count = itertools.chain(
+                        preprocessed['question'],
+                        *preprocessed['columns'],
+                        *preprocessed['tables'])
+
+            for token in to_count:
+                count_token = (
+                    self.word_emb is None or
+                    self.count_tokens_in_word_emb_for_vocab or
+                    self.word_emb.lookup(token) is None)
+                if count_token:
+                    self.vocab_builder.add_word(token)
+
+    def preprocess_item(self, item, validation_info):
+        if self.word_emb:
+            question = self.word_emb.tokenize(item.orig['question'])
+        else:
+            question = item.text
+
+        preproc_schema = self._preprocess_schema(item.schema)
+
+        return {
+            'question': self._tokenize(item.text, item.orig['question']),
+            'db_id': item.schema.db_id,
+            'columns': preproc_schema.column_names,
+            'tables': preproc_schema.table_names,
+            'table_bounds': preproc_schema.table_bounds,
+            'column_to_table': preproc_schema.column_to_table,
+            'table_to_columns': preproc_schema.table_to_columns,
+            'foreign_keys': preproc_schema.foreign_keys,
+            'foreign_keys_tables': preproc_schema.foreign_keys_tables,
+            'primary_keys': preproc_schema.primary_keys,
+        }
+
+    def _preprocess_schema(self, schema):
+        if schema.db_id in self.preprocessed_schemas:
+            return self.preprocessed_schemas[schema.db_id]
+        result = self._preprocess_schema_uncached(schema)
+        self.preprocessed_schemas[schema.db_id] = result
+        return result
+    
+    def _preprocess_schema_uncached(self, schema):
+        r = PreprocessedSchema()
+
+        last_table_id = None
+        for i, column in enumerate(schema.columns):
+            column_name = ['<type: {}>'.format(column.type)] + self._tokenize(
+                    column.name, column.unsplit_name)
+            if self.include_table_name_in_column:
+                if column.table is None:
+                    table_name = ['<any-table>']
+                else:
+                    table_name = self._tokenize(
+                        column.table.name, column.table.unsplit_name)
+                column_name += ['<table-sep>'] + table_name
+            r.column_names.append(column_name)
+
+            table_id = None if column.table is None else column.table.id
+            r.column_to_table[str(i)] = table_id
+            if table_id is not None:
+                columns = r.table_to_columns.setdefault(str(table_id), [])
+                columns.append(i)
+            if last_table_id != table_id:
+                r.table_bounds.append(i)
+                last_table_id = table_id
+
+            if column.foreign_key_for is not None:
+                r.foreign_keys[str(column.id)] = column.foreign_key_for.id
+                r.foreign_keys_tables[str(column.table.id)].add(column.foreign_key_for.table.id)
+
+        r.table_bounds.append(len(schema.columns))
+        assert len(r.table_bounds) == len(schema.tables) + 1
+
+        for i, table in enumerate(schema.tables):
+            r.table_names.append(self._tokenize(
+                table.name, table.unsplit_name))
+
+        r.foreign_keys_tables = serialization.to_dict_with_sorted_values(r.foreign_keys_tables)
+        r.primary_keys = [
+            column.id
+            for column in table.primary_keys
+            for table in schema.tables
+        ]
+
+        return r
+
+    def _tokenize(self, presplit, unsplit):
+        if self.word_emb:
+            return self.word_emb.tokenize(unsplit)
+        return presplit
+
+    def save(self):
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.vocab = self.vocab_builder.finish()
+        self.vocab.save(self.vocab_path)
+
+        for section, texts in self.texts.items():
+            with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
+                for text in texts:
+                    f.write(json.dumps(text) + '\n')
+
+    def load(self):
+        self.vocab = vocab.Vocab.load(self.vocab_path)
+
+    def dataset(self, section):
+        return [
+            json.loads(line)
+            for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+
+
 @registry.register('encoder', 'spiderv2')
 class SpiderEncoderV2(torch.nn.Module):
 
     batched = True
-
-    class Preproc(abstract_preproc.AbstractPreproc):
-        def __init__(
-                self,
-                save_path,
-                min_freq=3,
-                max_count=5000,
-                include_table_name_in_column=True,
-                word_emb=None,
-                count_tokens_in_word_emb_for_vocab=False):
-            if word_emb is None:
-                self.word_emb = None
-            else:
-                self.word_emb = registry.construct('word_emb', word_emb)
-
-            self.data_dir = os.path.join(save_path, 'enc')
-            self.include_table_name_in_column = include_table_name_in_column
-            self.count_tokens_in_word_emb_for_vocab = count_tokens_in_word_emb_for_vocab
-            # TODO: Write 'train', 'val', 'test' somewhere else
-            self.texts = {'train': [], 'val': [], 'test': []}
-
-            self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
-            self.vocab_path = os.path.join(save_path, 'enc_vocab.json')
-            self.vocab = None
-            self.counted_db_ids = set()
-
-        def validate_item(self, item, section):
-            return True, None
-        
-        def add_item(self, item, section, validation_info):
-            preprocessed = self.preprocess_item(item, validation_info)
-            self.texts[section].append(preprocessed)
-
-            if section == 'train':
-                if item.schema.db_id in self.counted_db_ids:
-                    to_count = preprocessed['question']
-                else:
-                    self.counted_db_ids.add(item.schema.db_id)
-                    to_count = itertools.chain(
-                            preprocessed['question'],
-                            *preprocessed['columns'],
-                            *preprocessed['tables'])
-
-                for token in to_count:
-                    count_token = (
-                        self.word_emb is None or 
-                        self.count_tokens_in_word_emb_for_vocab or
-                        self.word_emb.lookup(token) is None)
-                    if count_token:
-                        self.vocab_builder.add_word(token)
-
-        def preprocess_item(self, item, validation_info):
-            column_names = []
-            table_names = []
-            table_bounds = []
-            column_to_table = {}
-            table_to_columns = {str(i): [] for i in range(len(item.schema.tables))}
-            foreign_keys = {}
-            foreign_keys_tables = collections.defaultdict(set)
-
-            last_table_id = None
-            for i, column in enumerate(item.schema.columns):
-                column_name = ['<type: {}>'.format(column.type)] + self._tokenize(
-                        column.name, column.unsplit_name)
-                if self.include_table_name_in_column:
-                    if column.table is None:
-                        table_name = ['<any-table>']
-                    else:
-                        table_name = self._tokenize(
-                            column.table.name, column.table.unsplit_name)
-                    column_name += ['<table-sep>'] + table_name
-                column_names.append(column_name)
-
-                table_id = None if column.table is None else column.table.id
-                column_to_table[str(i)] = table_id
-                if table_id is not None:
-                    table_to_columns[str(table_id)].append(i)
-                if last_table_id != table_id:
-                    table_bounds.append(i)
-                    last_table_id = table_id
-
-                if column.foreign_key_for is not None:
-                    foreign_keys[str(column.id)] = column.foreign_key_for.id
-                    foreign_keys_tables[str(column.table.id)].add(column.foreign_key_for.table.id)
-
-            table_bounds.append(len(item.schema.columns))
-            assert len(table_bounds) == len(item.schema.tables) + 1
-
-            for i, table in enumerate(item.schema.tables):
-                table_names.append(self._tokenize(
-                    table.name, table.unsplit_name))
-
-            if self.word_emb:
-                question = self.word_emb.tokenize(item.orig['question'])
-            else:
-                question = item.text
-            return {
-                'question': self._tokenize(item.text, item.orig['question']),
-                'db_id': item.schema.db_id,
-                'columns': column_names,
-                'tables': table_names,
-                'table_bounds': table_bounds,
-                'column_to_table': column_to_table,
-                'table_to_columns': table_to_columns,
-                'foreign_keys': foreign_keys,
-                'foreign_keys_tables': serialization.to_dict_with_sorted_values(foreign_keys_tables),
-                'primary_keys': [
-                    column.id
-                    for column in table.primary_keys 
-                    for table in item.schema.tables
-                ],
-            }
-
-        def _tokenize(self, presplit, unsplit):
-            if self.word_emb:
-                return self.word_emb.tokenize(unsplit)
-            return presplit
-
-        def save(self):
-            os.makedirs(self.data_dir, exist_ok=True)
-            self.vocab = self.vocab_builder.finish()
-            self.vocab.save(self.vocab_path)
-
-            for section, texts in self.texts.items():
-                with open(os.path.join(self.data_dir, section + '.jsonl'), 'w') as f:
-                    for text in texts:
-                        f.write(json.dumps(text) + '\n')
-
-        def load(self):
-            self.vocab = vocab.Vocab.load(self.vocab_path)
-
-        def dataset(self, section):
-            return [
-                json.loads(line)
-                for line in open(os.path.join(self.data_dir, section + '.jsonl'))]
+    Preproc = SpiderEncoderV2Preproc
 
     def __init__(
             self,
