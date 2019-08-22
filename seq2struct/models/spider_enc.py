@@ -17,6 +17,7 @@ from seq2struct.models import spider_enc_modules
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 from seq2struct.utils import serialization
+from seq2struct import resources
 
 
 @attr.s
@@ -107,7 +108,7 @@ class SpiderEncoderV2Preproc(abstract_preproc.AbstractPreproc):
         preproc_schema = self._preprocess_schema(item.schema)
 
         return {
-            'question': self._tokenize(item.text, item.orig['question']),
+            'question': question,
             'db_id': item.schema.db_id,
             'columns': preproc_schema.column_names,
             'tables': preproc_schema.table_names,
