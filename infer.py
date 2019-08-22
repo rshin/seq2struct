@@ -70,14 +70,14 @@ class Inferer:
                     sliced_orig_data = orig_data
                     sliced_preproc_data = preproc_data
                 assert len(orig_data) == len(preproc_data)
-                self.__infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output)
+                self._inner_infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output)
             elif args.mode == 'debug':
                 data = self.model_preproc.dataset(args.section)
                 if args.limit:
                     sliced_data = itertools.islice(data, args.limit)
                 else:
                     sliced_data = data
-                __debug(model, sliced_data, output)
+                self._debug(model, sliced_data, output)
             elif args.mode == 'visualize_attention':
                 model.visualize_flag = True
                 model.decoder.visualize_flag = True
@@ -86,9 +86,9 @@ class Inferer:
                     sliced_data = itertools.islice(data, args.limit)
                 else:
                     sliced_data = data
-                __visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
+                self._visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
 
-    def __infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output):
+    def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output):
         for i, (orig_item, preproc_item) in enumerate(
                 tqdm.tqdm(zip(sliced_orig_data, sliced_preproc_data),
                           total=len(sliced_orig_data))):
@@ -116,7 +116,7 @@ class Inferer:
             output.flush()
 
 
-    def __debug(self, model, sliced_data, output):
+    def _debug(self, model, sliced_data, output):
         for i, item in enumerate(tqdm.tqdm(sliced_data)):
             (_, history), = model.compute_loss([item], debug=True)
             output.write(
@@ -126,7 +126,7 @@ class Inferer:
                     }) + '\n')
             output.flush()
 
-    def __visualize_attention(self, model, beam_size, output_history, sliced_data, res1file, res2file, res3file, output):
+    def _visualize_attention(self, model, beam_size, output_history, sliced_data, res1file, res2file, res3file, output):
         res1 = json.load(open(res1file, 'r'))
         res1 = res1['per_item']
         res2 = json.load(open(res2file, 'r'))

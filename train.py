@@ -117,7 +117,7 @@ class Trainer:
         # 3. Get training data somewhere
         with self.data_random:
             train_data = self.model_preproc.dataset('train')
-            train_data_loader = self.__yield_batches_from_epochs(
+            train_data_loader = self._yield_batches_from_epochs(
                 torch.utils.data.DataLoader(
                     train_data,
                     batch_size=self.train_config.batch_size,
@@ -145,9 +145,9 @@ class Trainer:
                 # Evaluate model
                 if last_step % self.train_config.eval_every_n == 0:
                     if self.train_config.eval_on_train:
-                        self.__eval_model(self.logger, self.model, last_step, train_eval_data_loader, 'train', num_eval_items=self.train_config.num_eval_items)
+                        self._eval_model(self.logger, self.model, last_step, train_eval_data_loader, 'train', num_eval_items=self.train_config.num_eval_items)
                     if self.train_config.eval_on_val:
-                        self.__eval_model(self.logger, self.model, last_step, val_data_loader, 'val', num_eval_items=self.train_config.num_eval_items)
+                        self._eval_model(self.logger, self.model, last_step, val_data_loader, 'val', num_eval_items=self.train_config.num_eval_items)
 
                 # Compute and apply gradient
                 with self.model_random:
@@ -168,13 +168,13 @@ class Trainer:
 
 
     @staticmethod
-    def __yield_batches_from_epochs(loader):
+    def _yield_batches_from_epochs(loader):
         while True:
             for batch in loader:
                 yield batch
     
     @staticmethod
-    def __eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
+    def _eval_model(logger, model, last_step, eval_data_loader, eval_section, num_eval_items=None):
         stats = collections.defaultdict(float)
         model.eval()
         with torch.no_grad():
