@@ -27,10 +27,12 @@ class SpiderEncoder(torch.nn.Module):
             self.data_dir = os.path.join(save_path, 'enc')
 
             self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
+            self.init_texts()
+            self.vocab = None
+
+        def init_texts(self):
             # TODO: Write 'train', 'val', 'test' somewhere else
             self.texts = {'train': [], 'val': [], 'test': []}
-
-            self.vocab = None
 
         def validate_item(self, item, section):
             return True, None
@@ -44,6 +46,9 @@ class SpiderEncoder(torch.nn.Module):
                         self.vocab_builder.add_word(token)
 
             self.texts[section].append(self.preprocess_item(item, validation_info))
+
+        def clear_items(self):
+            self.init_texts()
 
         def preprocess_item(self, item, validation_info):
             column_names = []

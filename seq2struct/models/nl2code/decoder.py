@@ -82,8 +82,7 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.vocab_builder = vocab.VocabBuilder(min_freq, max_count)
         self.use_seq_elem_rules = use_seq_elem_rules
 
-        # TODO: Write 'train', 'val', 'test' somewhere else
-        self.items = {'train': [], 'val': [], 'test': []}
+        self.init_items()
         self.sum_type_constructors = collections.defaultdict(set)
         self.field_presence_infos = collections.defaultdict(set)
         self.seq_lengths = collections.defaultdict(set)
@@ -92,6 +91,10 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
         self.vocab = None
         self.all_rules = None
         self.rules_mask = None
+
+    def init_items(self):
+        # TODO: Write 'train', 'val', 'test' somewhere else
+        self.items = {'train': [], 'val': [], 'test': []}
 
     def validate_item(self, item, section):
         parsed = self.grammar.parse(item.code, section)
@@ -111,6 +114,9 @@ class NL2CodeDecoderPreproc(abstract_preproc.AbstractPreproc):
             NL2CodeDecoderPreprocItem(
                 tree=root,
                 orig_code=item.code))
+
+    def clear_items(self):
+        self.init_items()
 
     def save(self):
         os.makedirs(self.data_dir, exist_ok=True)
