@@ -94,12 +94,10 @@ class Inferer:
         total = len(sliced_orig_data)
 
         params = []
-        pbar_queue = multiprocessing.Manager().Queue()
+        pbar = MultiProcessTqdm(total=total, smoothing=0, dynamic_ncols=True)
         for chunk in chunked(list_items, total // (nproc * 3)):
-            params.append((model, beam_size, output_history, chunk, pbar_queue))
+            params.append((model, beam_size, output_history, chunk, pbar.update))
 
-        proc = multiprocessing.Process(target=listener, args=(total, pbar_queue))
-        proc.start()
         with multiprocessing.Pool(nproc) as pool:
             asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
             res = [y for x in asyncs for y in x.get()]
@@ -108,13 +106,12 @@ class Inferer:
             output.write(item)
             output.flush()
 
-        pbar_queue.put(None)
-        proc.join()
+        pbar.close()
 
-    def _infer_batch(self, model, beam_size, output_history, triples, pbar_queue):
-        return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar_queue) for (idx, (oi, pi)) in triples]
+    def _infer_batch(self, model, beam_size, output_history, triples, pbar):
+        return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
 
-    def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar_queue):
+    def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar):
         beams = beam_search.beam_search(
                 model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
 
@@ -130,7 +127,7 @@ class Inferer:
                     'choice_history': beam.choice_history,
                     'score_history': beam.score_history,
                 } if output_history else {})})
-        pbar_queue.put('done!')
+        pbar()
         return json.dumps({
             'index': index,
             'beams': decoded,
@@ -156,10 +153,10 @@ class Inferer:
         interest_cnt = 0
         cnt = 0
         for i, item in enumerate(tqdm.tqdm(sliced_data)):
-        
+
             if res1[i]['hardness'] != 'extra':
                 continue
-        
+
             cnt += 1
             if (res1[i]['exact'] == 0) and (res2[i]['exact'] == 0) and (res3[i]['exact'] == 0):
                 continue
@@ -196,6 +193,26 @@ class Inferer:
             '''
         print(interest_cnt * 1.0 / cnt)
 
+class MultiProcessTqdm:
+    def __init__(self, **kwargs):
+        self.queue = multiprocessing.Manager().Queue()
+        self.proc = multiprocessing.Process(target=listener, args=(self.queue,), kwargs=kwargs)
+        self.proc.start()
+
+    def close(self):
+        self.queue.put(None)
+        self.proc.join()
+
+    @property
+    def update(self):
+        return UpdateCallback(self.queue)
+
+class UpdateCallback:
+    def __init__(self, queue):
+        self.queue = queue
+    def __call__(self):
+        self.queue.put('update')
+
 def chunked(items, size):
     elements = []
     for it in items:
@@ -206,8 +223,8 @@ def chunked(items, size):
     if elements:
         yield elements
 
-def listener(total, pbar_queue):
-    for _ in tqdm.tqdm(iter(pbar_queue.get, None), total=total, smoothing=0):
+def listener(pbar_queue, **kwargs):
+    for _ in tqdm.tqdm(iter(pbar_queue.get, None), **kwargs):
         pass
 
 def main():
