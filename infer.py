@@ -10,7 +10,7 @@ import asdl
 import astor
 import torch
 import tqdm
-from multiprocessing import Pool, Manager, Process
+import multiprocessing
 
 from seq2struct import beam_search
 from seq2struct import datasets
@@ -94,13 +94,13 @@ class Inferer:
         total = len(sliced_orig_data)
 
         params = []
-        pbar_queue = Manager().Queue()
+        pbar_queue = multiprocessing.Manager().Queue()
         for chunk in chunked(list_items, total // (nproc * 3)):
             params.append((model, beam_size, output_history, chunk, pbar_queue))
 
-        proc = Process(target=listener, args=(total, pbar_queue))
+        proc = multiprocessing.Process(target=listener, args=(total, pbar_queue))
         proc.start()
-        with Pool(nproc) as pool:
+        with multiprocessing.Pool(nproc) as pool:
             asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
             res = [y for x in asyncs for y in x.get()]
 
