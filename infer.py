@@ -94,13 +94,16 @@ class Inferer:
         total = len(sliced_orig_data)
 
         params = []
-        pbar = MultiProcessTqdm(total=total, smoothing=0, dynamic_ncols=True)
+        pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
         for chunk in chunked(list_items, total // (nproc * 3)):
             params.append((model, beam_size, output_history, chunk, pbar.update))
 
-        with multiprocessing.Pool(nproc) as pool:
-            asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
-            res = [y for x in asyncs for y in x.get()]
+        if nproc > 1:
+            with multiprocessing.Pool(nproc) as pool:
+                asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
+                res = [y for x in asyncs for y in x.get()]
+        else:
+            res = [self._infer_batch(*param) for param in params]
 
         for item in res:
             output.write(item)
