@@ -49,11 +49,11 @@ class SpiderLanguage:
         self.pointers = set()
 
         if use_table_pointer:
-            custom_primitive_type_checkers['table'] = lambda x: isinstance(x, int)
+            custom_primitive_type_checkers['table'] = ast_util.FilterType(int)
             self.pointers.add('table')
 
         if include_columns:
-            custom_primitive_type_checkers['column'] = lambda x: isinstance(x, int)
+            custom_primitive_type_checkers['column'] = ast_util.FilterType(int)
             self.pointers.add('column')
 
         self.ast_wrapper = ast_util.ASTWrapper(

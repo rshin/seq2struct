@@ -10,6 +10,7 @@ import asdl
 import astor
 import torch
 import tqdm
+import multiprocessing
 
 from seq2struct import beam_search
 from seq2struct import datasets
@@ -70,7 +71,7 @@ class Inferer:
                     sliced_orig_data = orig_data
                     sliced_preproc_data = preproc_data
                 assert len(orig_data) == len(preproc_data)
-                self._inner_infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output)
+                self._inner_infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output, args.nproc)
             elif args.mode == 'debug':
                 data = self.model_preproc.dataset(args.section)
                 if args.limit:
@@ -88,33 +89,52 @@ class Inferer:
                     sliced_data = data
                 self._visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
 
-    def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output):
-        for i, (orig_item, preproc_item) in enumerate(
-                tqdm.tqdm(zip(sliced_orig_data, sliced_preproc_data),
-                          total=len(sliced_orig_data))):
-            beams = beam_search.beam_search(
-                    model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
+    def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output, nproc):
+        list_items = list(enumerate(zip(sliced_orig_data, sliced_preproc_data)))
+        total = len(sliced_orig_data)
 
-            decoded = []
-            for beam in beams:
-                model_output, inferred_code = beam.inference_state.finalize()
+        params = []
+        pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
+        for chunk in chunked(list_items, total // (nproc * 3)):
+            params.append((model, beam_size, output_history, chunk, pbar.update))
 
-                decoded.append({
-                    'model_output': model_output,
-                    'inferred_code': inferred_code,
-                    'score': beam.score,
-                    **({
-                        'choice_history': beam.choice_history,
-                        'score_history': beam.score_history,
-                    } if output_history else {})})
+        if nproc > 1:
+            with multiprocessing.Pool(nproc) as pool:
+                asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
+                res = [y for x in asyncs for y in x.get()]
+        else:
+            res = [self._infer_batch(*param) for param in params]
 
-            output.write(
-                json.dumps({
-                    'index': i,
-                    'beams': decoded,
-                }) + '\n')
+        for item in res:
+            output.write(item)
             output.flush()
 
+        pbar.close()
+
+    def _infer_batch(self, model, beam_size, output_history, triples, pbar):
+        return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
+
+    def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar):
+        beams = beam_search.beam_search(
+                model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
+
+        decoded = []
+        for beam in beams:
+            model_output, inferred_code = beam.inference_state.finalize()
+
+            decoded.append({
+                'model_output': model_output,
+                'inferred_code': inferred_code,
+                'score': beam.score,
+                **({
+                    'choice_history': beam.choice_history,
+                    'score_history': beam.score_history,
+                } if output_history else {})})
+        pbar()
+        return json.dumps({
+            'index': index,
+            'beams': decoded,
+        }) + '\n'
 
     def _debug(self, model, sliced_data, output):
         for i, item in enumerate(tqdm.tqdm(sliced_data)):
@@ -136,10 +156,10 @@ class Inferer:
         interest_cnt = 0
         cnt = 0
         for i, item in enumerate(tqdm.tqdm(sliced_data)):
-        
+
             if res1[i]['hardness'] != 'extra':
                 continue
-        
+
             cnt += 1
             if (res1[i]['exact'] == 0) and (res2[i]['exact'] == 0) and (res3[i]['exact'] == 0):
                 continue
@@ -176,6 +196,39 @@ class Inferer:
             '''
         print(interest_cnt * 1.0 / cnt)
 
+class MultiProcessTqdm:
+    def __init__(self, **kwargs):
+        self.queue = multiprocessing.Manager().Queue()
+        self.proc = multiprocessing.Process(target=listener, args=(self.queue,), kwargs=kwargs)
+        self.proc.start()
+
+    def close(self):
+        self.queue.put(None)
+        self.proc.join()
+
+    @property
+    def update(self):
+        return UpdateCallback(self.queue)
+
+class UpdateCallback:
+    def __init__(self, queue):
+        self.queue = queue
+    def __call__(self):
+        self.queue.put('update')
+
+def chunked(items, size):
+    elements = []
+    for it in items:
+        elements.append(it)
+        if len(elements) == size:
+            yield elements
+            elements = []
+    if elements:
+        yield elements
+
+def listener(pbar_queue, **kwargs):
+    for _ in tqdm.tqdm(iter(pbar_queue.get, None), **kwargs):
+        pass
 
 def main():
     parser = argparse.ArgumentParser()
@@ -193,6 +246,7 @@ def main():
     parser.add_argument('--res1', default='outputs/glove-sup-att-1h-0/outputs.json')
     parser.add_argument('--res2', default='outputs/glove-sup-att-1h-1/outputs.json')
     parser.add_argument('--res3', default='outputs/glove-sup-att-1h-2/outputs.json')
+    parser.add_argument('--nproc', type=int, default=1)
     args = parser.parse_args()
 
     if args.config_args:

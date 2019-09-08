@@ -65,17 +65,25 @@ class ASTWrapperVisitor(asdl.VisitorBase):
 
 SingularType = Union[asdl.Constructor, asdl.Product]
 
+class FilterType:
+    def __init__(self, typ):
+        self.typ = typ
+    def __call__(self, x):
+        return isinstance(x, self.typ)
+
+def is_singleton(x):
+    return x is True or x is False or x is None
 
 class ASTWrapper(object):
     '''Provides helper methods on the ASDL AST.'''
 
     default_primitive_type_checkers = {
-        'identifier': lambda x: isinstance(x, str),
-        'int': lambda x: isinstance(x, int),
-        'string': lambda x: isinstance(x, str),
-        'bytes': lambda x: isinstance(x, bytes),
-        'object': lambda x: isinstance(x, object),
-        'singleton': lambda x: x is True or x is False or x is None
+        'identifier': FilterType(str),
+        'int': FilterType(int),
+        'string': FilterType(str),
+        'bytes': FilterType(bytes),
+        'object': FilterType(object),
+        'singleton': is_singleton
     }
 
     # pylint: disable=too-few-public-methods

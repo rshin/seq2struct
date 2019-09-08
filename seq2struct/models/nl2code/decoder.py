@@ -284,6 +284,11 @@ class TreeState:
     node = attr.ib()
     parent_field_type = attr.ib()
 
+def logsumexp(logprobs):
+    return -torch.logsumexp(logprobs, dim=1)
+
+def mean(logprobs):
+    return -torch.mean(logprobs, dim=1)
 
 @registry.register('decoder', 'NL2Code')
 class NL2CodeDecoder(torch.nn.Module):
@@ -394,10 +399,10 @@ class NL2CodeDecoder(torch.nn.Module):
             # TODO: Figure out how to get right sizes (query, key) to module
             self.copy_pointer = copy_pointer
         if multi_loss_type == 'logsumexp':
-            self.multi_loss_reduction = lambda logprobs: -torch.logsumexp(logprobs, dim=1)
+            self.multi_loss_reduction = logsumexp
         elif multi_loss_type == 'mean':
-            self.multi_loss_reduction = lambda logprobs: -torch.mean(logprobs, dim=1)
-        
+            self.multi_loss_reduction = mean
+
         self.pointers = torch.nn.ModuleDict()
         self.pointer_action_emb_proj = torch.nn.ModuleDict()
         for pointer_type in self.preproc.grammar.pointers:
