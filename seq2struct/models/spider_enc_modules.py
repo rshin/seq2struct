@@ -1,3 +1,4 @@
+import collections
 import itertools
 import operator
 
@@ -12,6 +13,7 @@ except ImportError:
     pass
 from seq2struct.models import transformer
 from seq2struct.utils import batched_sequence
+from seq2struct.utils import registry
 
 
 
@@ -277,13 +279,19 @@ class BiLSTM(torch.nn.Module):
         return new_all_embs, new_boundaries
 
 
-class RelationalTransformerUpdate(torch.nn.Module):
+class RelationProvider:
 
-    def __init__(self, device, num_layers, num_heads, hidden_size, 
-            ff_size=None,
-            dropout=0.1,
+    def compute_relation(self, desc, i_type, i_index, i_token_index, j_type, j_index, j_token_index):
+        raise NotImplementedError
+
+    @property
+    def all_relation_types(self):
+        raise NotImplementedError
+
+
+class SchemaRelationProvider(RelationProvider):
+    def __init__(self, 
             merge_types=False,
-            tie_layers=False,
             qq_max_dist=2,
             #qc_token_match=True,
             #qt_token_match=True,
@@ -297,10 +305,7 @@ class RelationalTransformerUpdate(torch.nn.Module):
             tc_table_match=True,
             tc_foreign_key=True,
             tt_max_dist=2,
-            tt_foreign_key=True,
-            ):
-        super().__init__()
-        self._device = device
+            tt_foreign_key=True):
 
         self.qq_max_dist    = qq_max_dist
         #self.qc_token_match = qc_token_match
@@ -317,9 +322,9 @@ class RelationalTransformerUpdate(torch.nn.Module):
         self.tt_max_dist    = tt_max_dist
         self.tt_foreign_key = tt_foreign_key
 
-        self.relation_ids = {}
-        def add_relation(name):
-            self.relation_ids[name] = len(self.relation_ids)
+        self.relation_map = collections.OrderedDict()
+        def add_relation(key):
+            self.relation_map[key] = key
         def add_rel_dist(name, max_dist):
             for i in range(-max_dist, max_dist + 1):
                 add_relation((name, i))
@@ -386,17 +391,149 @@ class RelationalTransformerUpdate(torch.nn.Module):
             assert tt_max_dist == qq_max_dist
 
             add_relation('xx_default')
-            self.relation_ids['qc_default'] = self.relation_ids['xx_default']
-            self.relation_ids['qt_default'] = self.relation_ids['xx_default']
-            self.relation_ids['cq_default'] = self.relation_ids['xx_default']
-            self.relation_ids['cc_default'] = self.relation_ids['xx_default']
-            self.relation_ids['ct_default'] = self.relation_ids['xx_default']
-            self.relation_ids['tc_default'] = self.relation_ids['xx_default']
-            self.relation_ids['tt_default'] = self.relation_ids['xx_default']
+            self.relation_map['qc_default'] = 'xx_default'
+            self.relation_map['qt_default'] = 'xx_default'
+            self.relation_map['cq_default'] = 'xx_default'
+            self.relation_map['cc_default'] = 'xx_default'
+            self.relation_map['ct_default'] = 'xx_default'
+            self.relation_map['tc_default'] = 'xx_default'
+            self.relation_map['tt_default'] = 'xx_default'
 
             for i in range(-qq_max_dist, qq_max_dist + 1):
-                self.relation_ids['cc_dist', i] = self.relation_ids['qq_dist', i]
-                self.relation_ids['tt_dist', i] = self.relation_ids['tt_dist', i]
+                self.relation_map['cc_dist', i] = ('qq_dist', i)
+                self.relation_map['tt_dist', i] = ('tt_dist', i)
+
+        # Ordering of this is very important!
+        self._all_relation_types = list(self.relation_map.keys())
+
+    @property
+    def all_relation_types(self):
+        return self._all_relation_types
+
+    # i/j_type: question/column/table
+    # i/j_index: 
+    # - question: always 0
+    # - column/table: index of the column/table within the schema
+    # i/j_token_index: index for the token within the description for the item that the token belongs to
+    def compute_relation(self, desc, i_type, i_index, i_token_index, j_type, j_index, j_token_index):
+        result = None
+        def set_relation(key):
+            nonlocal result
+            result = self.relation_map[key]
+
+        if i_type == 'question':
+            if j_type == 'question':
+                set_relation(('qq_dist', clamp(j_token_index - i_token_index, self.qq_max_dist)))
+            elif j_type == 'column':
+                set_relation('qc_default')
+            elif j_type == 'table':
+                set_relation('qt_default')
+
+        elif i_type == 'column':
+            if j_type == 'question':
+                set_relation('cq_default')
+            elif j_type == 'column':
+                col1, col2 = i_index, j_index
+                if i_index == j_index:
+                    set_relation(('cc_dist', clamp(j_token_index - i_token_index, self.cc_max_dist)))
+                else:
+                    set_relation('cc_default')
+                    if self.cc_foreign_key:
+                        if desc['foreign_keys'].get(str(col1)) == col2:
+                            set_relation('cc_foreign_key_forward')
+                        if desc['foreign_keys'].get(str(col2)) == col1:
+                            set_relation('cc_foreign_key_backward')
+                    if (self.cc_table_match and 
+                        desc['column_to_table'][str(col1)] == desc['column_to_table'][str(col2)]):
+                        set_relation('cc_table_match')
+
+            elif j_type == 'table':
+                col, table = i_index, j_index
+                set_relation('ct_default')
+                if self.ct_foreign_key and self.match_foreign_key(desc, col, table):
+                    set_relation('ct_foreign_key')
+                if self.ct_table_match:
+                    col_table = desc['column_to_table'][str(col)] 
+                    if col_table == table:
+                        if col in desc['primary_keys']:
+                            set_relation('ct_primary_key')
+                        else:
+                            set_relation('ct_table_match')
+                    elif col_table is None:
+                        set_relation('ct_any_table')
+
+        elif i_type == 'table':
+            if j_type == 'question':
+                set_relation('tq_default')
+            elif j_type == 'column':
+                table, col = i_index, j_index
+                set_relation('tc_default')
+
+                if self.tc_foreign_key and self.match_foreign_key(desc, col, table):
+                    set_relation('tc_foreign_key')
+                if self.tc_table_match:
+                    col_table = desc['column_to_table'][str(col)] 
+                    if col_table == table:
+                        if col in desc['primary_keys']:
+                            set_relation('tc_primary_key')
+                        else:
+                            set_relation('tc_table_match')
+                    elif col_table is None:
+                        set_relation('tc_any_table')
+            elif j_type == 'table':
+                table1, table2 = i_index, j_index
+                if table1 == table2:
+                    set_relation(('tt_dist', clamp(j_token_index - i_token_index, self.tt_max_dist)))
+                else:
+                    set_relation('tt_default')
+                    if self.tt_foreign_key:
+                        forward = table2 in desc['foreign_keys_tables'].get(str(table1), ())
+                        backward = table1 in desc['foreign_keys_tables'].get(str(table2), ())
+                        if forward and backward:
+                            set_relation('tt_foreign_key_both')
+                        elif forward:
+                            set_relation('tt_foreign_key_forward')
+                        elif backward:
+                            set_relation('tt_foreign_key_backward')
+
+        return result
+
+    @classmethod
+    def match_foreign_key(cls, desc, col, table):
+        foreign_key_for = desc['foreign_keys'].get(str(col))
+        if foreign_key_for is None:
+            return False
+
+        foreign_table = desc['column_to_table'][str(foreign_key_for)]
+        return desc['column_to_table'][str(col)] == foreign_table
+
+class RelationalTransformerUpdate(torch.nn.Module):
+
+    def __init__(self, device, num_layers, num_heads, hidden_size, 
+            tie_layers=False,
+            ff_size=None,
+            dropout=0.1,
+            relation_providers=[
+                {'name': 'schema'},
+            ]):
+        super().__init__()
+        self._device = device
+
+        registered_relation_providers = {
+            'schema': SchemaRelationProvider,
+        }
+        self.relation_providers = [
+            registry.instantiate(
+                registered_relation_providers[config['name']],
+                config,
+                unused_keys=('name',))
+            for config in relation_providers
+        ]
+        self.relation_ids = {}
+
+        for provider in self.relation_providers:
+            for key in provider.all_relation_types:
+                self.relation_ids[key] = len(self.relation_ids)
 
         if ff_size is None:
             ff_size = hidden_size * 4
@@ -496,108 +633,33 @@ class RelationalTransformerUpdate(torch.nn.Module):
         # Catalogue which things are where
         loc_types = {}
         for i in range(q_enc_length):
-            loc_types[i] = ('question',)
+            loc_types[i] = ('question', 0, i)
 
         c_base = q_enc_length
         for c_id, (c_start, c_end) in enumerate(zip(c_boundaries, c_boundaries[1:])):
             for i in range(c_start + c_base, c_end + c_base):
-                loc_types[i] = ('column', c_id)
+                loc_types[i] = ('column', c_id, i - c_start - c_base)
         t_base = q_enc_length + c_enc_length
         for t_id, (t_start, t_end) in enumerate(zip(t_boundaries, t_boundaries[1:])):
             for i in range(t_start + t_base, t_end + t_base):
-                loc_types[i] = ('table', t_id)
+                loc_types[i] = ('table', t_id, i - t_start - t_base)
         
         relations = np.empty((enc_length, enc_length), dtype=np.int64)
 
         for i, j in itertools.product(range(enc_length),repeat=2):
-            def set_relation(name):
-                relations[i, j] = self.relation_ids[name]
+            i_type, i_index, i_token_index = loc_types[i]
+            j_type, j_index, j_token_index = loc_types[j]
 
-            i_type, j_type = loc_types[i], loc_types[j]
-            if i_type[0] == 'question':
-                if j_type[0] == 'question':
-                    set_relation(('qq_dist', clamp(j - i, self.qq_max_dist)))
-                elif j_type[0] == 'column':
-                    set_relation('qc_default')
-                elif j_type[0] == 'table':
-                    set_relation('qt_default')
-
-            elif i_type[0] == 'column':
-                if j_type[0] == 'question':
-                    set_relation('cq_default')
-                elif j_type[0] == 'column':
-                    col1, col2 = i_type[1], j_type[1]
-                    if col1 == col2:
-                        set_relation(('cc_dist', clamp(j - i, self.cc_max_dist)))
-                    else:
-                        set_relation('cc_default')
-                        if self.cc_foreign_key:
-                            if desc['foreign_keys'].get(str(col1)) == col2:
-                                set_relation('cc_foreign_key_forward')
-                            if desc['foreign_keys'].get(str(col2)) == col1:
-                                set_relation('cc_foreign_key_backward')
-                        if (self.cc_table_match and 
-                            desc['column_to_table'][str(col1)] == desc['column_to_table'][str(col2)]):
-                            set_relation('cc_table_match')
-
-                elif j_type[0] == 'table':
-                    col, table = i_type[1], j_type[1]
-                    set_relation('ct_default')
-                    if self.ct_foreign_key and self.match_foreign_key(desc, col, table):
-                        set_relation('ct_foreign_key')
-                    if self.ct_table_match:
-                        col_table = desc['column_to_table'][str(col)] 
-                        if col_table == table:
-                            if col in desc['primary_keys']:
-                                set_relation('ct_primary_key')
-                            else:
-                                set_relation('ct_table_match')
-                        elif col_table is None:
-                            set_relation('ct_any_table')
-
-            elif i_type[0] == 'table':
-                if j_type[0] == 'question':
-                    set_relation('tq_default')
-                elif j_type[0] == 'column':
-                    table, col = i_type[1], j_type[1]
-                    set_relation('tc_default')
-
-                    if self.tc_foreign_key and self.match_foreign_key(desc, col, table):
-                        set_relation('tc_foreign_key')
-                    if self.tc_table_match:
-                        col_table = desc['column_to_table'][str(col)] 
-                        if col_table == table:
-                            if col in desc['primary_keys']:
-                                set_relation('tc_primary_key')
-                            else:
-                                set_relation('tc_table_match')
-                        elif col_table is None:
-                            set_relation('tc_any_table')
-                elif j_type[0] == 'table':
-                    table1, table2 = i_type[1], j_type[1]
-                    if table1 == table2:
-                        set_relation(('tt_dist', clamp(j - i, self.tt_max_dist)))
-                    else:
-                        set_relation('tt_default')
-                        if self.tt_foreign_key:
-                            forward = table2 in desc['foreign_keys_tables'].get(str(table1), ())
-                            backward = table1 in desc['foreign_keys_tables'].get(str(table2), ())
-                            if forward and backward:
-                                set_relation('tt_foreign_key_both')
-                            elif forward:
-                                set_relation('tt_foreign_key_forward')
-                            elif backward:
-                                set_relation('tt_foreign_key_backward')
+            relation_name = None
+            for provider in self.relation_providers:
+                relation_name = provider.compute_relation(
+                    desc, i_type, i_index, i_token_index, j_type, j_index, j_token_index)
+                if relation_name is not None:
+                    relations[i, j] = self.relation_ids[relation_name]
+                    break
+            if relation_name is None:
+                raise ValueError('No relation provider worked')
         return relations
-
-    @classmethod
-    def match_foreign_key(cls, desc, col, table):
-        foreign_key_for = desc['foreign_keys'].get(str(col))
-        if foreign_key_for is None:
-            return False
-
-        foreign_table = desc['column_to_table'][str(foreign_key_for)]
-        return desc['column_to_table'][str(col)] == foreign_table
 
 
 class NoOpUpdate:
