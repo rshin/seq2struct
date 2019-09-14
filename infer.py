@@ -101,9 +101,9 @@ class Inferer:
         if nproc > 1:
             with multiprocessing.Pool(nproc) as pool:
                 asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
-                res = [y for x in asyncs for y in x.get()]
+                res = (infer_result for async_result in asyncs for infer_result in async_result.get())
         else:
-            res = [self._infer_batch(*param) for param in params]
+            res = (infer_result for param in params for infer_result in self._infer_batch(*param))
 
         for item in res:
             output.write(item)
