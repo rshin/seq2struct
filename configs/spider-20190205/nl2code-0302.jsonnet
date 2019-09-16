@@ -71,12 +71,15 @@ function(args) {
             update_config: 
                 if args.upd_steps == 0 then {
                     name: 'none',
-                } else ({
+                } else {
                     name: 'relational_transformer',
                     num_layers: args.upd_steps,
                     num_heads: 8,
                     tie_layers: args.upd_tied,
-                } + enc_update_types[args.upd_type]),
+                    relation_providers: [
+                        {name: 'schema'} + enc_update_types[args.upd_type],
+                    ],
+                },
         },   
         decoder: {
             name: 'NL2Code',

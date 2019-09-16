@@ -42,7 +42,10 @@ function(args) _0428_base(output_from=false) + {
                 name: 'none',
             } else super.update_config + {
                 num_layers: args.num_layers,
-            } + enc_update_types[args.upd_type],
+                relation_providers: [
+                    {name: 'schema'} + enc_update_types[args.upd_type],
+                ],
+            }
         },
 
         encoder_preproc+: {
