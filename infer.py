@@ -115,26 +115,33 @@ class Inferer:
         return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
 
     def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar):
-        beams = beam_search.beam_search(
-                model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
+        try:
+            beams = beam_search.beam_search(
+                    model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
 
-        decoded = []
-        for beam in beams:
-            model_output, inferred_code = beam.inference_state.finalize()
+            decoded = []
+            for beam in beams:
+                model_output, inferred_code = beam.inference_state.finalize()
 
-            decoded.append({
-                'model_output': model_output,
-                'inferred_code': inferred_code,
-                'score': beam.score,
-                **({
-                    'choice_history': beam.choice_history,
-                    'score_history': beam.score_history,
-                } if output_history else {})})
-        pbar()
-        return json.dumps({
-            'index': index,
-            'beams': decoded,
-        }) + '\n'
+                decoded.append({
+                    'model_output': model_output,
+                    'inferred_code': inferred_code,
+                    'score': beam.score,
+                    **({
+                        'choice_history': beam.choice_history,
+                        'score_history': beam.score_history,
+                    } if output_history else {})})
+            pbar()
+            result = {
+                'index': index,
+                'beams': decoded,
+            }
+        except Exception as e:
+            result = {
+                'index': index,
+                'error': str(e),
+            }
+        return json.dumps(result) + '\n'
 
     def _debug(self, model, sliced_data, output):
         for i, item in enumerate(tqdm.tqdm(sliced_data)):
