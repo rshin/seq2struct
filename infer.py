@@ -95,19 +95,15 @@ class Inferer:
 
         params = []
         pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
-        for chunk in chunked(list_items, total // (nproc * 3)):
+        for chunk in chunked(list_items, (total // (nproc * 3)) if nproc > 1 else 1):
             params.append((model, beam_size, output_history, chunk, pbar.update))
 
         if nproc > 1:
             with multiprocessing.Pool(nproc) as pool:
                 asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
-                res = (infer_result for async_result in asyncs for infer_result in async_result.get())
+                write_all(output, (infer_result for async_result in asyncs for infer_result in async_result.get()))
         else:
-            res = (infer_result for param in params for infer_result in self._infer_batch(*param))
-
-        for item in res:
-            output.write(item)
-            output.flush()
+            write_all(output, (infer_result for param in params for infer_result in self._infer_batch(*param)))
 
         pbar.close()
 
@@ -202,6 +198,11 @@ class Inferer:
             output.flush()
             '''
         print(interest_cnt * 1.0 / cnt)
+
+def write_all(output, genexp):
+    for item in genexp:
+        output.write(item)
+        output.flush()
 
 class MultiProcessTqdm:
     def __init__(self, **kwargs):
