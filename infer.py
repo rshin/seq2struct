@@ -95,7 +95,7 @@ class Inferer:
 
         params = []
         pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
-        for chunk in chunked(list_items, total // (nproc * 3)):
+        for chunk in chunked(list_items, (total // (nproc * 3)) if nproc > 1 else 1):
             params.append((model, beam_size, output_history, chunk, pbar.update))
 
         if nproc > 1:
