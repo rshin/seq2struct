@@ -15,9 +15,11 @@ def main():
     parser.add_argument('--inferred', required=True)
     parser.add_argument('--output')
     parser.add_argument('--logdir')
+    parser.add_argument('--evaluate-beams-individually', action='store_true')
     args = parser.parse_args()
 
-    real_logdir, metrics = evaluation.compute_metrics(args.config, args.config_args, args.section, args.inferred, args.logdir)
+    real_logdir, metrics = evaluation.compute_metrics(args.config, args.config_args, args.section, args.inferred, args.logdir,
+                                                      evaluate_beams_individually=args.evaluate_beams_individually)
 
     if args.output:
         if real_logdir:
