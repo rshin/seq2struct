@@ -27,7 +27,7 @@ function gdrive_download () {
 ```
 like `gdrive_download 11icoH_EA-NYb0OrPTdehRWm_d7-DIzWX`
 - Unzip it somewhere
-- Run `bash data/spider-20190206/generate.sh /path/to/unzipped/spider`
+- Run `bash data/spider-20190205/generate.sh /path/to/unzipped/spider`
 - Run `python preprocess.py --config configs/spider-20190205/arxiv-1906.11790v1.jsonnet`
 
 Install Stanford CoreNLP:
