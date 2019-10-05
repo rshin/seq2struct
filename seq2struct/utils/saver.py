@@ -70,7 +70,7 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
     if os.path.exists(path_without_step):
         os.unlink(path_without_step)
     try:
-        os.symlink(path_with_step, os.path.basename(path_without_step))
+        os.symlink(os.path.basename(path_with_step), path_without_step)
     except OSError:
         shutil.copy2(path_with_step, path_without_step)
 
