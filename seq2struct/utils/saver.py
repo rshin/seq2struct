@@ -53,7 +53,7 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
                     keep_every_n=10000000):
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
-    path = os.path.join(model_dir, 'model_checkpoint')
+    path_without_step = os.path.join(model_dir, 'model_checkpoint')
     step_padded = format(step, '08d')
     state_dict = model.state_dict()
     if ignore:
@@ -61,25 +61,25 @@ def save_checkpoint(model, optimizer, step, model_dir, ignore=[],
             for item in ignore:
                 if key.startswith(item):
                     state_dict.pop(key)
-    actual_checkpoint = '{}-{}'.format(path, step_padded)
+    path_with_step = '{}-{}'.format(path_without_step, step_padded)
     torch.save({
         'model': state_dict,
         'optimizer': optimizer.state_dict(),
         'step': step
-    }, actual_checkpoint)
-    if os.path.exists(path):
-        os.unlink(path)
+    }, path_with_step)
+    if os.path.exists(path_without_step):
+        os.unlink(path_without_step)
     try:
-        os.symlink(actual_checkpoint, path)
+        os.symlink(os.path.basename(path_with_step), path_without_step)
     except OSError:
-        shutil.copy2(actual_checkpoint, path)
+        shutil.copy2(path_with_step, path_without_step)
 
     # Cull old checkpoints.
     if keep_every_n is not None:
         all_checkpoints = []
         for name in os.listdir(model_dir):
             m = CHECKPOINT_PATTERN.match(name)
-            if m is None or name == os.path.basename(actual_checkpoint):
+            if m is None or name == os.path.basename(path_with_step):
                 continue
             checkpoint_step = int(m.group(1))
             all_checkpoints.append((checkpoint_step, name))
