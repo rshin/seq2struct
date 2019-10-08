@@ -225,6 +225,7 @@ class UpdateCallback:
         self.queue.put('update')
 
 def chunked(items, size):
+    size = max(1, size)
     elements = []
     for it in items:
         elements.append(it)
