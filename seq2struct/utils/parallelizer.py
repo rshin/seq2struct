@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-import multiprocessing
+import torch.multiprocessing as multiprocessing
 import tqdm
 
 class Parallelizer(ABC):
