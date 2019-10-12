@@ -131,19 +131,20 @@ class Parallelizer(ABC):
 
         pbar.close()
 
-def multi_processing_worker(f, x, input_queue, output_queue):
-    while True:
-        try:
-            index, y = input_queue.get(False)
-        except queue.Empty:
-            return
-        output_queue.put((index, f(x, y)))
-
 class CPUParallelizer(Parallelizer):
     def start_worker(self, f, x, input_queue, output_queue):
-        worker = multiprocessing.Process(target=multi_processing_worker, args=(f, x, input_queue, output_queue))
+        worker = multiprocessing.Process(target=self.multi_processing_worker, args=(f, x, input_queue, output_queue))
         worker.start()
         return worker
 
     def create_queue(self):
         return multiprocessing.Queue()
+
+    @staticmethod
+    def multi_processing_worker(f, x, input_queue, output_queue):
+        while True:
+            try:
+                index, y = input_queue.get(False)
+            except queue.Empty:
+                return
+            output_queue.put((index, f(x, y)))
