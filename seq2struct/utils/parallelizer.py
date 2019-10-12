@@ -87,7 +87,7 @@ class Parallelizer(ABC):
         """
         args = list(grouped_args)
         total = sum(len(ys) for _, ys in grouped_args)
-        pbar = (self._parallel_process_bar_class() if self.nproc > 1 else tqdm.tqdm)(total=len(args), smoothing=0, dynamic_ncols=True)
+        pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
 
         if self.nproc == 1:
             pbar = tqdm.tqdm(total=total)
