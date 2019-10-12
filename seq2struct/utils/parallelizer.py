@@ -62,12 +62,16 @@ class Parallelizer(ABC):
             self.start_worker(f, x, input, output)
 
         results = [None] * len(ys)
+        filled = [False] * len(ys)
+        to_yield = 0
         for _ in range(len(ys)):
             index, value = output.get()
             results[index] = value
+            filled[index] = True
             pbar.update()
-
-        yield from results
+            while to_yield < len(ys) and filled[to_yield]:
+                yield results[to_yield]
+                to_yield += 1
 
     def compute_ratio(self, f, x, y):
         start_x = time.time()
