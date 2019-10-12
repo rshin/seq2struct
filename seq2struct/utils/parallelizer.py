@@ -80,8 +80,10 @@ class Parallelizer(ABC):
     def compute_ratio(self, f, x, y):
         start_x = time.time()
         input_queue = self.create_queue()
-        input_queue.put(y)
-        self.start_worker(f, x, input_queue, self.create_queue())
+        output_queue = self.create_queue()
+        input_queue.put((0, y))
+        self.start_worker(f, x, input_queue, output_queue)
+        output_queue.get()
         end_x = time.time()
         start_y = time.time()
         f(x, y)
