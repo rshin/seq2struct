@@ -100,7 +100,7 @@ class Parallelizer(ABC):
 
         nworkers = []
         generators = []
-        while True:
+        while grouped_args:
             x, ys = grouped_args.pop(0)
             k = min(max(1, int((len(ys) / self.ratio) ** 0.5)), self.nproc)
             while k + sum(nworkers) > self.nproc:
@@ -155,9 +155,9 @@ def multi_processing_worker(f, x, input_queue, output_queue):
     while True:
         try:
             index, y = input_queue.get(False)
-        except queue.Queue.Empty:
+        except queue.Empty:
             return
-        output_queue.put(index, f(x, y))
+        output_queue.put((index, f(x, y)))
 
 class CPUParallelizer(Parallelizer):
     def start_worker(self, f, x, input_queue, output_queue):
