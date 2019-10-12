@@ -96,14 +96,14 @@ class Inferer:
 
         cp = parallelizer.CPUParallelizer(nproc, max(1, len(list_items) // (nproc * 3)))
         params = [
-            (model, beam_size, output_history, indices, orig_items, preproc_items)
+            (beam_size, output_history, indices, orig_items, preproc_items)
                 for indices, orig_items, preproc_items in list_items
         ]
-        write_all(output, cp.map_batched(self._infer_single, params))
+        write_all(output, cp.map_dispatched(self._infer_single, [(model, params)]))
 
-    def _infer_single(self, param):
+    def _infer_single(self, model, param):
 
-        model, beam_size, output_history, index, orig_item, preproc_item = param
+        beam_size, output_history, index, orig_item, preproc_item = param
 
         try:
             beams = beam_search.beam_search(
