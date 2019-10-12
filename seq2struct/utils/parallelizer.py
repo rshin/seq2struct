@@ -135,7 +135,6 @@ class CPUParallelizer(Parallelizer):
     def start_worker(self, f, x, input_queue, output_queue):
         worker = multiprocessing.Process(target=self.multi_processing_worker, args=(f, x, input_queue, output_queue))
         worker.start()
-        return worker
 
     def create_queue(self):
         return multiprocessing.Queue()
