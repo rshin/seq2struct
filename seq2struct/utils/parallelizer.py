@@ -49,7 +49,7 @@ class Parallelizer(ABC):
         Create a queue.Queue that interacts well with the worker threads.
         """
 
-    def map_pooled(self, f, x, n_workers, ys, pbar):
+    def _map_pooled(self, f, x, n_workers, ys, pbar):
         """
         A generator that yields (f(x, y) for y in ys)
         """
@@ -73,7 +73,7 @@ class Parallelizer(ABC):
                 yield results[to_yield]
                 to_yield += 1
 
-    def compute_ratio(self, f, x, y):
+    def _compute_ratio(self, f, x, y):
         start_x = time.time()
         input_queue = self.create_queue()
         output_queue = self.create_queue()
@@ -88,7 +88,7 @@ class Parallelizer(ABC):
         t_y = end_y - start_y
         return t_x / t_y
 
-    def map_dispatched(self, f, grouped_args):
+    def parallel_map(self, f, grouped_args):
         """
         Run the function fn on each of the args, in parallel, and yields each of
             the results.
@@ -96,6 +96,10 @@ class Parallelizer(ABC):
         Args
             fn: the function to run
             grouped_args: an iterable containing pairs (x, ys).
+                x values are "large" in some way and will be transported as
+                little as possible
+        Yields
+            (f(x, y) for x, ys in grouped_args for y in ys)
         """
 
         grouped_args = list(grouped_args)
@@ -115,7 +119,7 @@ class Parallelizer(ABC):
         ratio = self.ratio
         if ratio is None:
             x, (y, *_) = grouped_args[0]
-            ratio = self.compute_ratio(f, x, y)
+            ratio = self._compute_ratio(f, x, y)
 
         nworkers = []
         generators = []
@@ -127,7 +131,7 @@ class Parallelizer(ABC):
                 yield from generators.pop(0)
 
             nworkers.append(k)
-            generators.append(self.map_pooled(f, x, k, ys, pbar))
+            generators.append(self._map_pooled(f, x, k, ys, pbar))
 
         for gen in generators:
             yield from gen
