@@ -90,7 +90,7 @@ class Parallelizer(ABC):
         end_y = time.time()
         t_x = end_x - start_x
         t_y = end_y - start_y
-        return (t_x) / (t_y)
+        return t_x / t_y
 
     def map_dispatched(self, f, grouped_args):
         """
@@ -107,7 +107,6 @@ class Parallelizer(ABC):
         pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
 
         if self.nproc == 1:
-            pbar = tqdm.tqdm(total=total)
             for x, ys in grouped_args:
                 for y in ys:
                     yield f(x, y)
@@ -120,7 +119,6 @@ class Parallelizer(ABC):
             if grouped_args:
                 (x, (y, *_)), *_ = grouped_args
                 ratio = self.compute_ratio(f, x, y)
-                print("Computed empirical ratio: %.4f" % ratio)
             else:
                 ratio = 1.0
 
