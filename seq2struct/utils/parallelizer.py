@@ -24,7 +24,7 @@ class Parallelizer(ABC):
     If `ratio=None` is passed in, we empirically `ratio = t_x/t_y`
         with a 1-point estimate of `t_y` and `t_x`.
     """
-    def __init__(self, nproc, ratio=None):
+    def __init__(self, max_nproc, ratio=None):
         """
         Create a Parallelizer
 
@@ -32,9 +32,9 @@ class Parallelizer(ABC):
             nproc: the total number of processes to use
             batch_size: the size of a single chunk of elements to be sent to a process
         """
-        assert isinstance(nproc, int) and nproc >= 1
+        assert isinstance(max_nproc, int) and max_nproc >= 1
         assert ratio is None or isinstance(ratio, float) and ratio > 0
-        self.nproc = nproc
+        self.max_nproc = max_nproc
         self.ratio = ratio
 
     @abstractmethod
@@ -98,11 +98,13 @@ class Parallelizer(ABC):
             grouped_args: an iterable containing pairs (x, ys).
         """
 
-        args = list(grouped_args)
+        grouped_args = list(grouped_args)
+        if not grouped_args:
+            return
         total = sum(len(ys) for _, ys in grouped_args)
         pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
 
-        if self.nproc == 1:
+        if self.max_nproc == 1:
             for x, ys in grouped_args:
                 for y in ys:
                     yield f(x, y)
@@ -112,18 +114,15 @@ class Parallelizer(ABC):
 
         ratio = self.ratio
         if ratio is None:
-            if grouped_args:
-                (x, (y, *_)), *_ = grouped_args
-                ratio = self.compute_ratio(f, x, y)
-            else:
-                ratio = 1.0
+            x, (y, *_) = grouped_args[0]
+            ratio = self.compute_ratio(f, x, y)
 
         nworkers = []
         generators = []
         while grouped_args:
             x, ys = grouped_args.pop(0)
-            k = min(max(1, int((len(ys) / ratio) ** 0.5)), self.nproc)
-            while k + sum(nworkers) > self.nproc:
+            k = min(max(1, int((len(ys) / ratio) ** 0.5)), self.max_nproc)
+            while k + sum(nworkers) > self.max_nproc:
                 nworkers.pop(0)
                 yield from generators.pop(0)
 
