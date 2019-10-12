@@ -94,7 +94,7 @@ class Inferer:
         list_items = [(idx, oi, pi) for idx, (oi, pi) in enumerate(zip(sliced_orig_data, sliced_preproc_data))]
         total = len(sliced_orig_data)
 
-        cp = parallelizer.CPUParallelizer(nproc, 3.0)
+        cp = parallelizer.CPUParallelizer(nproc)
         params = [
             (beam_size, output_history, indices, orig_items, preproc_items)
                 for indices, orig_items, preproc_items in list_items

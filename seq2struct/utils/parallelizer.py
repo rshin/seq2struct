@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 
+import time
 import queue
 import multiprocessing
 import tqdm
@@ -23,7 +24,7 @@ class Parallelizer(ABC):
     If `ratio=None` is passed in, we empirically `ratio = t_x/t_y`
         with a 1-point estimate of `t_y` and `t_x`.
     """
-    def __init__(self, nproc, ratio):
+    def __init__(self, nproc, ratio=None):
         """
         Create a Parallelizer
 
@@ -32,7 +33,7 @@ class Parallelizer(ABC):
             batch_size: the size of a single chunk of elements to be sent to a process
         """
         assert isinstance(nproc, int) and nproc >= 1
-        assert isinstance(ratio, float) and ratio > 0
+        assert ratio is None or isinstance(ratio, float) and ratio > 0
         self.nproc = nproc
         self.ratio = ratio
 
@@ -76,6 +77,15 @@ class Parallelizer(ABC):
             can be shipped to individual processes.
         """
 
+    def compute_ratio(self, f, x, y):
+        start_x = time.time()
+        self.start_worker(f, x, self.create_queue(), self.create_queue())
+        end_x = time.time()
+        start_y = time.time()
+        f(x, y)
+        end_y = time.time()
+        return (end_x - start_x) / (end_y - start_y)
+
     def map_dispatched(self, f, grouped_args):
         """
         Run the function fn on each of the args, in parallel, and yields each of
@@ -85,6 +95,7 @@ class Parallelizer(ABC):
             fn: the function to run
             grouped_args: an iterable containing pairs (x, ys).
         """
+
         args = list(grouped_args)
         total = sum(len(ys) for _, ys in grouped_args)
         pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
@@ -98,11 +109,20 @@ class Parallelizer(ABC):
             pbar.close()
             return
 
+        ratio = self.ratio
+        if ratio is None:
+            if grouped_args:
+                (x, (y, *_)), *_ = grouped_args
+                ratio = self.compute_ratio(f, x, y)
+                print("Computed empirical ratio: %.4f" % ratio)
+            else:
+                ratio = 1.0
+
         nworkers = []
         generators = []
         while grouped_args:
             x, ys = grouped_args.pop(0)
-            k = min(max(1, int((len(ys) / self.ratio) ** 0.5)), self.nproc)
+            k = min(max(1, int((len(ys) / ratio) ** 0.5)), self.nproc)
             while k + sum(nworkers) > self.nproc:
                 nworkers.pop(0)
                 yield from generators.pop(0)
