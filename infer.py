@@ -99,7 +99,7 @@ class Inferer:
             (beam_size, output_history, indices, orig_items, preproc_items)
                 for indices, orig_items, preproc_items in list_items
         ]
-        write_all(output, cp.map_dispatched(self._infer_single, [(model, params)]))
+        write_all(output, cp.parallel_map(self._infer_single, [(model, params)]))
 
     def _infer_single(self, model, param):
 
