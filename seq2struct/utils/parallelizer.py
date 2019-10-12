@@ -32,7 +32,7 @@ class Parallelizer(ABC):
             batch_size: the size of a single chunk of elements to be sent to a process
         """
         assert isinstance(nproc, int) and nproc >= 1
-        assert isinstance(batch_size, int) and batch_size >= 1
+        assert isinstance(ratio, float) and ratio > 0
         self.nproc = nproc
         self.ratio = ratio
 
