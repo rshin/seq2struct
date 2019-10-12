@@ -79,12 +79,16 @@ class Parallelizer(ABC):
 
     def compute_ratio(self, f, x, y):
         start_x = time.time()
-        self.start_worker(f, x, self.create_queue(), self.create_queue())
+        input_queue = self.create_queue()
+        input_queue.put(y)
+        self.start_worker(f, x, input_queue, self.create_queue())
         end_x = time.time()
         start_y = time.time()
         f(x, y)
         end_y = time.time()
-        return (end_x - start_x) / (end_y - start_y)
+        t_x = end_x - start_x
+        t_y = end_y - start_y
+        return (t_x) / (t_y)
 
     def map_dispatched(self, f, grouped_args):
         """
