@@ -69,14 +69,6 @@ class Parallelizer(ABC):
 
         yield from results
 
-
-    @abstractmethod
-    def _parallel_process_bar_class(self):
-        """
-        Return a class with an interface similar to tqdm.tqdm, whose update function
-            can be shipped to individual processes.
-        """
-
     def compute_ratio(self, f, x, y):
         start_x = time.time()
         input_queue = self.create_queue()
@@ -139,42 +131,6 @@ class Parallelizer(ABC):
 
         pbar.close()
 
-class MultiProcessTqdm:
-    def __init__(self, **kwargs):
-        self.queue = multiprocessing.Manager().Queue()
-        self.proc = multiprocessing.Process(target=listener, args=(self.queue,), kwargs=kwargs)
-        self.proc.start()
-
-    def close(self):
-        self.queue.put(None)
-        self.proc.join()
-
-    @property
-    def update(self):
-        return UpdateCallback(self.queue)
-
-def listener(pbar_queue, **kwargs):
-    for _ in tqdm.tqdm(iter(pbar_queue.get, None), **kwargs):
-        pass
-
-class UpdateCallback:
-    def __init__(self, queue):
-        self.queue = queue
-    def __call__(self):
-        self.queue.put('update')
-
-
-def chunked(items, size):
-    size = max(1, size)
-    elements = []
-    for it in items:
-        elements.append(it)
-        if len(elements) == size:
-            yield elements
-            elements = []
-    if elements:
-        yield elements
-
 def multi_processing_worker(f, x, input_queue, output_queue):
     while True:
         try:
@@ -191,6 +147,3 @@ class CPUParallelizer(Parallelizer):
 
     def create_queue(self):
         return multiprocessing.Queue()
-
-    def _parallel_process_bar_class(self):
-        return MultiProcessTqdm
