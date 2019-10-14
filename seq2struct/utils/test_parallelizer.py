@@ -19,5 +19,3 @@ def test_parallelizer():
     from_parent = 1
     results = list(p.parallel_map(func_2, [(lambda x: x + from_parent, [3, 4, 5])]))
     assert results == [4, 5, 6], str(results)
-
-test_parallelizer()
