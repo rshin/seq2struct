@@ -30,7 +30,8 @@ class Parallelizer(ABC):
 
         Args
             nproc: the total number of processes to use
-            batch_size: the size of a single chunk of elements to be sent to a process
+            ratio: the predicted ratio between the amount of time to set up a process
+                and the amount of time to execute the function.
         """
         assert isinstance(max_nproc, int) and max_nproc >= 1
         assert ratio is None or isinstance(ratio, float) and ratio > 0
