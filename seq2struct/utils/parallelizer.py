@@ -10,19 +10,19 @@ import tqdm
 class Parallelizer(ABC):
     """
     A parallelizer is a general purpose task used to handle the situation of
-        executing a function f(x, y) on a series of inputs x_i, y_i, where
-        x is often quite large and thus difficult to transport to a given
-        process, but there are typically fewer distinct values of x, allowing
-        for each process to use at most one value of x.
+        executing functions f(x) on a series of functions and inputs f_i, x_i, where
+        f is often quite large and thus difficult to transport to a given
+        process, but there are typically fewer distinct values of f, allowing
+        for each process to use at most one value of f.
 
-    If it takes a constant amount of time `t_x` to ship x to a process and a constant
-        amount of time `t_y` to ship y to a process then execute f(x, y) and return the
-        result, then if we have `n` ys for a given x, then using `k` processes
-        takes time `k * t_x + n/k * t_y`, which is minimized when `t_x = n * t_y / k^2`,
-        or when `k = sqrt(n * t_y / t_x)`.
+    If it takes a constant amount of time `t_f` to ship f to a process and a constant
+        amount of time `t_x` to ship x to a process then execute f(x) and return the
+        result, then if we have `n` xs for a given f, then using `k` processes
+        takes time `k * t_f + n/k * t_x`, which is minimized when `t_f = n * t_x / k^2`,
+        or when `k = sqrt(n * t_x / t_f)`.
 
-    If `ratio=None` is passed in, we empirically `ratio = t_x/t_y`
-        with a 1-point estimate of `t_y` and `t_x`.
+    If `ratio=None` is passed in, we empirically `ratio = t_f/t_x`
+        with a 1-point estimate of `t_x` and `t_f`.
     """
     def __init__(self, max_nproc, ratio=None):
         """
@@ -39,9 +39,9 @@ class Parallelizer(ABC):
         self.ratio = ratio
 
     @abstractmethod
-    def start_worker(self, f, x, input_queue, output_queue):
+    def start_worker(self, f, input_queue, output_queue):
         """
-        Create a worker, and transport f and x to it.
+        Create a worker, and transport f to it.
         """
 
     @abstractmethod
@@ -50,89 +50,89 @@ class Parallelizer(ABC):
         Create a queue.Queue that interacts well with the worker threads.
         """
 
-    def _map_pooled(self, f, x, n_workers, ys, pbar):
+    def _map_pooled(self, f, n_workers, xs, pbar):
         """
-        A generator that yields (f(x, y) for y in ys)
+        A generator that yields map(f, xs)
         """
         input = self.create_queue()
         output = self.create_queue()
-        for indexed in enumerate(ys):
+        for indexed in enumerate(xs):
             input.put(indexed)
 
         for _ in range(n_workers):
-            self.start_worker(f, x, input, output)
+            self.start_worker(f, input, output)
 
-        results = [None] * len(ys)
-        filled = [False] * len(ys)
+        results = [None] * len(xs)
+        filled = [False] * len(xs)
         to_yield = 0
-        for _ in range(len(ys)):
+        for _ in range(len(xs)):
             index, value = output.get()
             results[index] = value
             filled[index] = True
             pbar.update()
-            while to_yield < len(ys) and filled[to_yield]:
+            while to_yield < len(xs) and filled[to_yield]:
                 yield results[to_yield]
                 to_yield += 1
 
-    def _compute_ratio(self, f, x, y):
-        start_x = time.time()
+    def _compute_ratio(self, f, x):
+        f(x)
+        start_f = time.time()
         input_queue = self.create_queue()
         output_queue = self.create_queue()
-        input_queue.put((0, y))
-        self.start_worker(f, x, input_queue, output_queue)
+        input_queue.put((0, x))
+        self.start_worker(f, input_queue, output_queue)
         output_queue.get()
+        end_f = time.time()
+        start_x = time.time()
+        f(x)
         end_x = time.time()
-        start_y = time.time()
-        f(x, y)
-        end_y = time.time()
+        t_f = end_f - start_f
         t_x = end_x - start_x
-        t_y = end_y - start_y
-        return t_x / t_y
+        return t_f / t_x
 
-    def parallel_map(self, f, grouped_args):
+    def parallel_map(self, grouped_args):
         """
         Run the function fn on each of the args, in parallel, and yields each of
             the results.
 
         Args
-            fn: the function to run
-            grouped_args: an iterable containing pairs (x, ys).
+            grouped_args: an iterable containing pairs (f, xs).
                 x values are "large" in some way and will be transported as
                 little as possible
         Yields
-            (f(x, y) for x, ys in grouped_args for y in ys)
+            (f(x) for x, ys in grouped_args for y in ys)
         """
 
         grouped_args = list(grouped_args)
         if not grouped_args:
             return
-        total = sum(len(ys) for _, ys in grouped_args)
+        total = sum(len(xs) for _, xs in grouped_args)
         pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
 
         if self.max_nproc == 1:
-            for x, ys in grouped_args:
-                for y in ys:
-                    yield f(x, y)
+            for f, xs in grouped_args:
+                for x in xs:
+                    yield f(x)
                     pbar.update()
             pbar.close()
             return
 
         ratio = self.ratio
         if ratio is None:
-            x, (y, *_) = grouped_args[0]
-            ratio = self._compute_ratio(f, x, y)
+            f, (x, *_) = grouped_args[0]
+            ratio = self._compute_ratio(f, x)
 
         nworkers = []
         generators = []
         while grouped_args:
-            x, ys = grouped_args.pop(0)
-            k = min(max(1, int((len(ys) / ratio) ** 0.5)), self.max_nproc)
+            f, xs = grouped_args.pop(0)
+            k = min(max(1, int((len(xs) / ratio) ** 0.5)), self.max_nproc)
             while k + sum(nworkers) > self.max_nproc:
                 nworkers.pop(0)
                 yield from generators.pop(0)
 
             nworkers.append(k)
-            generators.append(self._map_pooled(f, x, k, ys, pbar))
+            generators.append(self._map_pooled(f, k, xs, pbar))
 
         for gen in generators:
             yield from gen
@@ -140,18 +140,18 @@ class Parallelizer(ABC):
         pbar.close()
 
 class CPUParallelizer(Parallelizer):
-    def start_worker(self, f, x, input_queue, output_queue):
-        worker = multiprocessing.Process(target=self.multi_processing_worker, args=(f, x, input_queue, output_queue))
+    def start_worker(self, f, input_queue, output_queue):
+        worker = multiprocessing.Process(target=self.multi_processing_worker, args=(f, input_queue, output_queue))
         worker.start()
 
     def create_queue(self):
         return multiprocessing.Queue()
 
     @staticmethod
-    def multi_processing_worker(f, x, input_queue, output_queue):
+    def multi_processing_worker(f, input_queue, output_queue):
         while True:
             try:
-                index, y = input_queue.get(False)
+                index, x = input_queue.get(False)
             except queue.Empty:
                 return
-            output_queue.put((index, f(x, y)))
+            output_queue.put((index, f(x)))
