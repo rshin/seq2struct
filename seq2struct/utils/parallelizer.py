@@ -74,7 +74,11 @@ class Parallelizer(ABC):
                 yield results[to_yield]
                 to_yield += 1
 
-    def _compute_ratio(self, f, x):
+    def _compute_ratio(self, grouped_args):
+        total = sum(len(xs) for _, xs in grouped_args)
+        if total <= 10:
+            return 1.0
+        f, (x, *_) = grouped_args[0]
         f(x)
         start_f = time.time()
         input_queue = self.create_queue()
@@ -119,8 +123,7 @@ class Parallelizer(ABC):
 
         ratio = self.ratio
         if ratio is None:
-            f, (x, *_) = grouped_args[0]
-            ratio = self._compute_ratio(f, x)
+            ratio = self._compute_ratio(grouped_args)
 
         nworkers = []
         generators = []
