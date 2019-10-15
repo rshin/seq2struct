@@ -95,6 +95,7 @@ class Parallelizer(ABC):
         end_x = time.time()
         t_x = (end_x - start_x) / 10
         t_f = end_f - start_f - t_x * 10
+        print(t_f, t_x)
         return max(t_f / t_x, 1e-10) # in case t_f was negative
 
     def pbar(self, total):
