@@ -98,8 +98,6 @@ class Parallelizer(ABC):
         t_x = (end_n - end_1) / (n_samples)
         t_f = (end_1 - start) - t_x
 
-        print(end_n - start, end_1 - start, t_x, t_f)
-
         return max(t_f / t_x, 1e-10) # in case t_f was negative
 
     def pbar(self, total):
