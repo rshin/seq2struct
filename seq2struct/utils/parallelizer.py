@@ -83,7 +83,8 @@ class Parallelizer(ABC):
         start_f = time.time()
         input_queue = self.create_queue()
         output_queue = self.create_queue()
-        input_queue.put((0, x))
+        for _ in range(10):
+            input_queue.put((0, x))
         self.start_worker(f, input_queue, output_queue)
         output_queue.get()
         end_f = time.time()
@@ -91,9 +92,9 @@ class Parallelizer(ABC):
         for _ in range(10):
             f(x)
         end_x = time.time()
-        t_f = end_f - start_f
         t_x = (end_x - start_x) / 10
-        return t_f / t_x
+        t_f = end_f - start_f - t_x * 10
+        return max(t_f / t_x, 1e-10) # in case t_f was negative
 
     def pbar(self, total):
         return tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
