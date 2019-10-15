@@ -79,23 +79,26 @@ class Parallelizer(ABC):
         if total <= 10:
             return 1.0
         f, (x, *_) = grouped_args[0]
-        f(x)
-        start_f = time.time()
+
+        start = time.time()
         input_queue = self.create_queue()
         output_queue = self.create_queue()
         for idx in range(10):
             input_queue.put((idx, x))
         self.start_worker(f, input_queue, output_queue)
-        for _ in range(10):
+
+        output_queue.get()
+        end_1 = time.time()
+
+        for _ in range(9):
             output_queue.get()
-        end_f = time.time()
-        start_x = time.time()
-        for _ in range(10):
-            f(x)
-        end_x = time.time()
-        t_x = (end_x - start_x) / 10
-        t_f = end_f - start_f - t_x * 10
-        print(t_f, t_x)
+        end_10 = time.time()
+
+        t_x = (end_10 - end_1) / 9
+        t_f = (end_1 - start) - t_x
+
+        print(end_10 - start, end_1 - start, t_x, t_f)
+
         return max(t_f / t_x, 1e-10) # in case t_f was negative
 
     def pbar(self, total):
