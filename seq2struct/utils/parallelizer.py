@@ -113,7 +113,7 @@ class Parallelizer(ABC):
                 x values are "large" in some way and will be transported as
                 little as possible
         Yields
-            (f(x) for x, ys in grouped_args for y in ys)
+            (f(x) for f, xs in grouped_args for x in xs)
         """
 
         grouped_args = list(grouped_args)
