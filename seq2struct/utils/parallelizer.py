@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 import time
 import queue
-import torch.multiprocessing as multiprocessing
+import multiprocessing
 import tqdm
 
 class Parallelizer(ABC):
