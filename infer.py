@@ -1,6 +1,7 @@
 import argparse
 import ast
 import itertools
+import functools
 import json
 import os
 import sys
@@ -18,6 +19,7 @@ from seq2struct import models
 from seq2struct import optimizers
 from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
+from seq2struct.utils import parallelizer
 
 class Inferer:
     def __init__(self, config):
@@ -90,27 +92,20 @@ class Inferer:
                 self._visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
 
     def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output, nproc):
-        list_items = list(enumerate(zip(sliced_orig_data, sliced_preproc_data)))
+        list_items = [(idx, oi, pi) for idx, (oi, pi) in enumerate(zip(sliced_orig_data, sliced_preproc_data))]
         total = len(sliced_orig_data)
 
-        params = []
-        pbar = (MultiProcessTqdm if nproc > 1 else tqdm.tqdm)(total=total, smoothing=0, dynamic_ncols=True)
-        for chunk in chunked(list_items, (total // (nproc * 3)) if nproc > 1 else 1):
-            params.append((model, beam_size, output_history, chunk, pbar.update))
+        cp = parallelizer.CPUParallelizer(nproc)
+        params = [
+            (beam_size, output_history, indices, orig_items, preproc_items)
+                for indices, orig_items, preproc_items in list_items
+        ]
+        write_all(output, cp.parallel_map([(functools.partial(self._infer_single, model), params)]))
 
-        if nproc > 1:
-            with multiprocessing.Pool(nproc) as pool:
-                asyncs = [pool.apply_async(self._infer_batch, args=param) for param in params]
-                write_all(output, (infer_result for async_result in asyncs for infer_result in async_result.get()))
-        else:
-            write_all(output, (infer_result for param in params for infer_result in self._infer_batch(*param)))
+    def _infer_single(self, model, param):
 
-        pbar.close()
+        beam_size, output_history, index, orig_item, preproc_item = param
 
-    def _infer_batch(self, model, beam_size, output_history, triples, pbar):
-        return [self._infer_single(model, beam_size, output_history, idx, oi, pi, pbar) for (idx, (oi, pi)) in triples]
-
-    def _infer_single(self, model, beam_size, output_history, index, orig_item, preproc_item, pbar):
         try:
             beams = beam_search.beam_search(
                     model, orig_item, preproc_item, beam_size=beam_size, max_steps=1000)
@@ -127,7 +122,6 @@ class Inferer:
                         'choice_history': beam.choice_history,
                         'score_history': beam.score_history,
                     } if output_history else {})})
-            pbar()
             result = {
                 'index': index,
                 'beams': decoded,
@@ -203,41 +197,6 @@ def write_all(output, genexp):
     for item in genexp:
         output.write(item)
         output.flush()
-
-class MultiProcessTqdm:
-    def __init__(self, **kwargs):
-        self.queue = multiprocessing.Manager().Queue()
-        self.proc = multiprocessing.Process(target=listener, args=(self.queue,), kwargs=kwargs)
-        self.proc.start()
-
-    def close(self):
-        self.queue.put(None)
-        self.proc.join()
-
-    @property
-    def update(self):
-        return UpdateCallback(self.queue)
-
-class UpdateCallback:
-    def __init__(self, queue):
-        self.queue = queue
-    def __call__(self):
-        self.queue.put('update')
-
-def chunked(items, size):
-    size = max(1, size)
-    elements = []
-    for it in items:
-        elements.append(it)
-        if len(elements) == size:
-            yield elements
-            elements = []
-    if elements:
-        yield elements
-
-def listener(pbar_queue, **kwargs):
-    for _ in tqdm.tqdm(iter(pbar_queue.get, None), **kwargs):
-        pass
 
 def main():
     parser = argparse.ArgumentParser()
