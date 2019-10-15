@@ -22,7 +22,8 @@ class Parallelizer(ABC):
         or when `k = sqrt(n * t_x / t_f)`.
 
     If `ratio=None` is passed in, we empirically `ratio = t_f/t_x`
-        with a 1-point estimate of `t_x` and `t_f`.
+        with an estimate of `t_x` and `t_f`, unless there are not many
+        examples, in which case 1 is used by default.
     """
     def __init__(self, max_nproc, ratio=None):
         """
