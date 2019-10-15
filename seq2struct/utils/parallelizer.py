@@ -86,7 +86,8 @@ class Parallelizer(ABC):
         for idx in range(10):
             input_queue.put((idx, x))
         self.start_worker(f, input_queue, output_queue)
-        output_queue.get()
+        for _ in range(10):
+            output_queue.get()
         end_f = time.time()
         start_x = time.time()
         for _ in range(10):
