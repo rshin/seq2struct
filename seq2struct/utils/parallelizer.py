@@ -94,6 +94,9 @@ class Parallelizer(ABC):
         t_x = end_x - start_x
         return t_f / t_x
 
+    def pbar(self, total):
+        return tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
+
     def parallel_map(self, grouped_args):
         """
         Run the function fn on each of the args, in parallel, and yields each of
@@ -111,9 +114,9 @@ class Parallelizer(ABC):
         if not grouped_args:
             return
         total = sum(len(xs) for _, xs in grouped_args)
-        pbar = tqdm.tqdm(total=total, smoothing=0, dynamic_ncols=True)
 
         if self.max_nproc == 1:
+            pbar = self.pbar(total)
             for f, xs in grouped_args:
                 for x in xs:
                     yield f(x)
@@ -124,7 +127,9 @@ class Parallelizer(ABC):
         ratio = self.ratio
         if ratio is None:
             ratio = self._compute_ratio(grouped_args)
+            print("Computed ratio: %.2f" % ratio)
 
+        pbar = self.pbar(total)
         nworkers = []
         generators = []
         while grouped_args:
