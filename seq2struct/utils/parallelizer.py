@@ -88,10 +88,11 @@ class Parallelizer(ABC):
         output_queue.get()
         end_f = time.time()
         start_x = time.time()
-        f(x)
+        for _ in range(10):
+            f(x)
         end_x = time.time()
         t_f = end_f - start_f
-        t_x = end_x - start_x
+        t_x = (end_x - start_x) / 10
         return t_f / t_x
 
     def pbar(self, total):
