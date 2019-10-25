@@ -21,6 +21,13 @@ from seq2struct.utils import registry
 from seq2struct.utils import saver as saver_mod
 from seq2struct.utils import parallelizer
 
+
+def maybe_slice(iterable, start, end):
+    if start is not None or end is not None:
+        iterable = itertools.islice(iterable, start, end)
+    return iterable
+
+
 class Inferer:
     def __init__(self, config):
         self.config = config
@@ -56,44 +63,24 @@ class Inferer:
     def infer(self, model, output_path, args):
         # 3. Get training data somewhere
         output = open(output_path, 'w')
-        data = registry.construct('dataset', self.config['data'][args.section])
-        if args.limit:
-            sliced_data = itertools.islice(data, args.limit)
-        else:
-            sliced_data = data
+        orig_data = registry.construct('dataset', self.config['data'][args.section])
+        sliced_orig_data = maybe_slice(orig_data, args.start_offset, args.limit)
+        preproc_data = self.model_preproc.dataset(args.section)
+        sliced_preproc_data = maybe_slice(preproc_data, args.start_offset, args.limit)
 
         with torch.no_grad():
             if args.mode == 'infer':
-                orig_data = registry.construct('dataset', self.config['data'][args.section])
-                preproc_data = self.model_preproc.dataset(args.section)
-                if args.limit:
-                    sliced_orig_data = itertools.islice(data, args.limit)
-                    sliced_preproc_data = itertools.islice(data, args.limit)
-                else:
-                    sliced_orig_data = orig_data
-                    sliced_preproc_data = preproc_data
                 assert len(orig_data) == len(preproc_data)
                 self._inner_infer(model, args.beam_size, args.output_history, sliced_orig_data, sliced_preproc_data, output, args.nproc)
             elif args.mode == 'debug':
-                data = self.model_preproc.dataset(args.section)
-                if args.limit:
-                    sliced_data = itertools.islice(data, args.limit)
-                else:
-                    sliced_data = data
-                self._debug(model, sliced_data, output)
+                self._debug(model, sliced_orig_data, output)
             elif args.mode == 'visualize_attention':
                 model.visualize_flag = True
                 model.decoder.visualize_flag = True
-                data = registry.construct('dataset', self.config['data'][args.section])
-                if args.limit:
-                    sliced_data = itertools.islice(data, args.limit)
-                else:
-                    sliced_data = data
-                self._visualize_attention(model, args.beam_size, args.output_history, sliced_data, args.res1, args.res2, args.res3, output)
+                self._visualize_attention(model, args.beam_size, args.output_history, sliced_orig_data, args.res1, args.res2, args.res3, output)
 
     def _inner_infer(self, model, beam_size, output_history, sliced_orig_data, sliced_preproc_data, output, nproc):
         list_items = [(idx, oi, pi) for idx, (oi, pi) in enumerate(zip(sliced_orig_data, sliced_preproc_data))]
-        total = len(sliced_orig_data)
 
         cp = parallelizer.CPUParallelizer(nproc)
         params = [
@@ -209,6 +196,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--beam-size', required=True, type=int)
     parser.add_argument('--output-history', action='store_true')
+    parser.add_argument('--start-offset', type=int)
     parser.add_argument('--limit', type=int)
     parser.add_argument('--mode', default='infer', choices=['infer', 'debug', 'visualize_attention'])
     parser.add_argument('--res1', default='outputs/glove-sup-att-1h-0/outputs.json')
