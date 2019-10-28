@@ -813,9 +813,10 @@ class TreeTraversal:
         item_id = attr.ib()
         state = attr.ib()
         node_type = attr.ib()
-        parent_action_emb = attr.ib()
-        parent_h = attr.ib()
+        parent_action_emb = attr.ib(repr=False)
+        parent_h = attr.ib(repr=False)
         parent_field_name = attr.ib()
+        parent_type_name = attr.ib(default=None)
 
         def to_str(self):
             return '<state: {}, node_type: {}, parent_field_name: {}>'.format(self.state, self.node_type, self.parent_field_name)
@@ -831,10 +832,6 @@ class TreeTraversal:
         POINTER_INQUIRE = 7
         POINTER_APPLY = 8
         NODE_FINISHED = 9
-
-    class PrevActionTypes(enum.Enum):
-        APPLY_RULE = 0
-        GEN_TOKEN = 1
 
     @attr.s
     class TemplateStack:
@@ -866,20 +863,22 @@ class TreeTraversal:
         def empty(self):
             return len(self.stack) == 0
 
-        #def popleft_entry_queue(self):
-        #    left = self.stack[-1].queue.left
-        #    return left, attr.evolve(
-        #        self,
-        #        stack=self.stack.set(
-        #            -1, 
-        #            attr.evolve(
-        #                self.stack[-1], 
-        #                queue=self.stack[-1].queue.popleft())))
+        def __bool__(self):
+            return bool(self.stack)
+
+        def __len__(self):
+            return len(self.stack)
+
+        def __getitem__(self, x):
+            return self.stack[x]
 
     @attr.s
     class ExecutingActionList:
         last_choices = attr.ib(default=None)
         queue = attr.ib(default=pyrsistent.pdeque())
+
+        # all_actions is only used for debugging
+        all_actions = attr.ib(default=None)
 
     @attr.s
     class InHole:
@@ -946,7 +945,7 @@ class TreeTraversal:
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
 
         while True:
-            if self.template_stack.empty:
+            if not self.template_stack:
                 pass
             elif isinstance(self.template_stack.top, TreeTraversal.InHole):
                 pass
@@ -975,49 +974,11 @@ class TreeTraversal:
                         TreeTraversal.ExecutingStep())
                     return choices
                 else:
-                    last_choice = next_item
-                    #if self.template_stack.top.last_choices:
-                    #    assert last_choice in set(
-                    #        c for c, _ in 
-                    #        self.template_stack.top.last_choices)
                     self.template_stack = self.template_stack.push(
                         TreeTraversal.ExecutingStep())
                     continue
-                    #_, self.template_stack = self.template_stack.pop()
-                    #self.template_stack = self.template_stack.set_state(
-                    #    attr.evolve(
-                    #        self.template_stack.top.state,
-                    #        last_choices=next_choices))
             else:
                 raise ValueError(self.template_stack.top.state)
-
-            #if not isinstance(self.hole_state, TreeTraversal.InHole) and self.template_queues[-1] and not self.suppress_templates:
-            #    next_template_item = self.template_queues[-1][0]
-            #    self.template_queues = self.template_queues.set(-1, self.template_queues[-1].popleft())
-            #    if isinstance(next_template_item, ast_util.HoleValuePlaceholder):
-            #        # We need to start asking what to do at this hole until we finish its content,
-            #         # i.e. when self.cur_item is finished
-            #        self.hole_state = TreeTraversal.InHole(self.cur_item.item_id)
-            #        continue
-            #    # check if there are any choices from the template which we need to step through
-            #    # list: a list of choices to step through
-            #    elif isinstance(next_template_item, list):
-            #        for choice in next_template_item:
-            #            # TODO: Need to also put hole_state, suppress_templates on a stack
-            #            self.template_queues = self.template_queues.append(pyrsistent.pdeque())
-            #            next_choices = self.step(choice)
-            #            self.hole_state = attr.evolve(
-            #                self.hole_state,
-            #                last_choices=next_choices)
-            #            self.template_queues = self.template_queues.delete(-1)
-            #        continue
-            #    # tuple: we need to ask which of these we should go with next
-            #    elif isinstance(next_template_item, tuple):
-            #        self.suppress_templates = True
-            #        return [(k, v) for k, v in self.hole_state.last_choices
-            #            if k in next_template_item]
-            #    else:
-            #        raise ValueError(next_template_item)
 
             self.update_using_last_choice(last_choice, extra_choice_info, attention_offset)
 
@@ -1059,7 +1020,8 @@ class TreeTraversal:
                     template_traversal.traverse_tree(template_with_placeholders, sum_type)
                     self.template_stack = self.template_stack.push(
                         TreeTraversal.ExecutingActionList(
-                            queue=pyrsistent.pdeque(template_traversal.steps)))
+                            queue=pyrsistent.pdeque(template_traversal.steps),
+                            all_actions=template_traversal.steps))
                     continue
 
                 self.cur_item = attr.evolve(
@@ -1113,10 +1075,11 @@ class TreeTraversal:
                 self.queue = self.queue.append(TreeTraversal.QueueItem(
                     item_id=self.cur_item.item_id,
                     state=NODE_FINISHED,
-                    node_type=None,
+                    node_type=node_type,
                     parent_action_emb=None,
                     parent_h=None,
-                    parent_field_name=None
+                    parent_type_name=self.cur_item.parent_type_name,
+                    parent_field_name=self.cur_item.parent_field_name,
                 ))
                 for field_info, present in reversed(
                         list(zip(self.model.ast_wrapper.singular_types[node_type].fields, children_presence))):
@@ -1152,6 +1115,7 @@ class TreeTraversal:
                         node_type=child_type,
                         parent_action_emb=self.prev_action_emb,
                         parent_h=self.cur_item.parent_h,
+                        parent_type_name=node_type,
                         parent_field_name=field_info.name,
                     ))
                     self.next_item_id += 1
@@ -1176,7 +1140,6 @@ class TreeTraversal:
                         parent_h=output)
 
                 self.update_prev_action_emb = TreeTraversal._update_prev_action_emb_apply_rule
-                self.suppress_templates = False
                 should_return, choices = self.process_choices(
                     self.rule_choice(list_type, rule_logits))
                 if should_return:
@@ -1213,6 +1176,7 @@ class TreeTraversal:
                         node_type=child_node_type,
                         parent_action_emb=self.prev_action_emb,
                         parent_h=self.cur_item.parent_h,
+                        parent_type_name=self.cur_item.parent_type_name,
                         parent_field_name=self.cur_item.parent_field_name,
                     ))
                     self.next_item_id += 1
@@ -1481,15 +1445,15 @@ class TreeTraversal:
         return False
 
     def process_choices(self, choices):
-        if (not self.template_stack.empty
-                and isinstance(self.template_stack.top,
-                  TreeTraversal.ExecutingStep)):
-            _, self.template_stack = self.template_stack.pop()
-            should_return = (
-                self.template_stack.empty or
-                not self.template_stack.top.queue)
-        else:
-            should_return = True
+        should_return = True
+        if self.template_stack:
+            top = self.template_stack.top
+            if (isinstance(top, TreeTraversal.ExecutingStep)
+                or isinstance(top, TreeTraversal.InHole) and top.is_finished):
+                _, self.template_stack = self.template_stack.pop()
+                should_return = (
+                    not self.template_stack or
+                    not self.template_stack.top.queue)
 
         if not should_return:
             self.template_stack = self.template_stack.evolve_top(
