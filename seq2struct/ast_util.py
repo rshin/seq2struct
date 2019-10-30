@@ -286,5 +286,7 @@ Node = Dict[str, Any]
 @attr.s
 class HoleValuePlaceholder:
     id = attr.ib()
+    field_name = attr.ib()
+    type = attr.ib()
     is_seq = attr.ib()
     is_opt = attr.ib()

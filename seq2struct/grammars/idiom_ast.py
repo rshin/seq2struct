@@ -155,7 +155,8 @@ class IdiomAstGrammar:
             hole_values = {}
             for field in constructor.fields:
                 hole_id = self.get_hole_id(field.name)
-                placeholder = ast_util.HoleValuePlaceholder(id=hole_id, is_seq=field.seq, is_opt=field.opt)
+                placeholder = ast_util.HoleValuePlaceholder(
+                    id=hole_id, field_name=field.name, type=field.type, is_seq=field.seq, is_opt=field.opt)
                 if field.seq:
                     hole_values[hole_id] = [placeholder]
                 else:

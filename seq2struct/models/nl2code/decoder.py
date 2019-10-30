@@ -22,6 +22,7 @@ try:
     from seq2struct.models import lstm
 except ImportError:
     pass
+from seq2struct.models.nl2code import idiom_template
 from seq2struct.utils import registry
 from seq2struct.utils import vocab
 from seq2struct.utils import serialization
@@ -832,9 +833,6 @@ class TreeTraversal:
         POINTER_INQUIRE = 7
         POINTER_APPLY = 8
         NODE_FINISHED = 9
-        # Exists to facilitate templates with variable-length or optional holes 
-        LIST_FINISHED = 10
-        MISSING_FIELD = 11
 
     @attr.s
     class TemplateStack:
@@ -850,12 +848,15 @@ class TreeTraversal:
             return top, attr.evolve(self, stack=self.stack.delete(-1))
 
         def evolve_top(self, **kwargs):
+            return self.evolve_i(-1, **kwargs)
+        
+        def evolve_i(self, i, **kwargs):
             return attr.evolve(
                 self,
                 stack=self.stack.set(
-                    -1,
+                    i,
                     attr.evolve(
-                        self.stack[-1],
+                        self.stack[i],
                         **kwargs)))
 
         @property
@@ -877,8 +878,8 @@ class TreeTraversal:
 
     @attr.s
     class ExecutingActionList:
+        action_provider = attr.ib()
         last_choices = attr.ib(default=None)
-        queue = attr.ib(default=pyrsistent.pdeque())
 
         # all_actions is only used for debugging
         all_actions = attr.ib(default=None)
@@ -888,6 +889,7 @@ class TreeTraversal:
         item_id_to_finish = attr.ib()
         is_finished = attr.ib(default=False)
 
+    @attr.s
     class ExecutingStep:
         pass
 
@@ -946,9 +948,8 @@ class TreeTraversal:
         POINTER_INQUIRE     = TreeTraversal.State.POINTER_INQUIRE
         POINTER_APPLY       = TreeTraversal.State.POINTER_APPLY
         NODE_FINISHED       = TreeTraversal.State.NODE_FINISHED
-        LIST_FINISHED       = TreeTraversal.State.LIST_FINISHED
-        MISSING_FIELD       = TreeTraversal.State.MISSING_FIELD
 
+        prev_choice = last_choice
         while True:
             if not self.template_stack:
                 pass
@@ -957,20 +958,19 @@ class TreeTraversal:
             elif isinstance(self.template_stack.top, TreeTraversal.ExecutingStep):
                 pass
             elif isinstance(self.template_stack.top, TreeTraversal.ExecutingActionList):
-                if not self.template_stack.top.queue:
-                    _, self.template_stack = self.template_stack.pop()
-                    continue
-                next_item = self.template_stack.top.queue.left
+                assert not self.template_stack.top.action_provider.finished
+
+                next_item, new_provider = self.template_stack.top.action_provider.step(prev_choice)
+                self.template_stack = self.template_stack.evolve_top(
+                        action_provider=new_provider)
 
                 if isinstance(next_item, ast_util.HoleValuePlaceholder):
                     # We need to start asking what to do at this hole until we finish its content,
                      # i.e. when self.cur_item is finished
-                    pop_next_item = not next_item.is_seq
                     to_push = TreeTraversal.InHole(self.cur_item.item_id)
                     next_choices = self.template_stack.top.last_choices
                     to_return = True
                 elif isinstance(next_item, tuple):
-                    pop_next_item = True
                     to_push = TreeTraversal.ExecutingStep()
                     # TODO: the `v`s (should be log probabilities) need to be
                     # normalized for beam search to be valid
@@ -978,19 +978,15 @@ class TreeTraversal:
                         if k in next_item]
                     to_return = True
                 else:
-                    pop_next_item = True
                     to_push = TreeTraversal.ExecutingStep()
                     next_choices = next_item
                     to_return = False
 
-                if pop_next_item:
-                    self.template_stack = self.template_stack.evolve_top(
-                            queue=self.template_stack.top.queue.popleft())
                 self.template_stack = self.template_stack.push(to_push)
                 if to_return:
                     return next_choices
                 else:
-                    last_choice = next_choices
+                    prev_choice = last_choice = next_choices
                     continue
             else:
                 raise ValueError(self.template_stack.top.state)
@@ -1031,12 +1027,10 @@ class TreeTraversal:
                     self.model.preproc.grammar, 'templates_containing_placeholders',
                     {}).get(singular_type)
                 if template_with_placeholders:
-                    template_traversal = TemplateTreeTraversal(self.model, self.desc_enc)
-                    template_traversal.traverse_tree(template_with_placeholders, sum_type)
+                    action_provider = idiom_template.TemplateActionProvider.build(
+                            self.model, template_with_placeholders, sum_type)
                     self.template_stack = self.template_stack.push(
-                        TreeTraversal.ExecutingActionList(
-                            queue=pyrsistent.pdeque(template_traversal.steps),
-                            all_actions=template_traversal.steps))
+                        TreeTraversal.ExecutingActionList(action_provider))
                     continue
 
                 self.cur_item = attr.evolve(
@@ -1098,20 +1092,7 @@ class TreeTraversal:
                 ))
                 for field_info, present in reversed(
                         list(zip(self.model.ast_wrapper.singular_types[node_type].fields, children_presence))):
-                    if not present and self.template_stack:
-                        if isinstance(self.template_stack.top, TreeTraversal.ExecutingStep):
-                            self.queue = self.queue.append(TreeTraversal.QueueItem(
-                                item_id=len(self.template_stack) - 2,
-                                state=MISSING_FIELD,
-                                node_type=field_info.type,
-                                parent_action_emb=None,
-                                parent_h=None,
-                                parent_type_name=node_type,
-                                parent_field_name=field_info.name,
-                            ))
-                        else:
-                            # Next line exists for breakpoint
-                            unused_variable = None
+                    if not present:
                         continue
 
                     # seq field: LIST_LENGTH_INQUIRE x
@@ -1197,20 +1178,6 @@ class TreeTraversal:
                 else:
                     raise ValueError('Unable to handle seq field type {}'.format(elem_type))
 
-                if self.template_stack:
-                    if isinstance(self.template_stack.top, TreeTraversal.ExecutingStep):
-                        self.queue = self.queue.append(TreeTraversal.QueueItem(
-                            item_id=len(self.template_stack) - 2,
-                            state=LIST_FINISHED,
-                            node_type=child_node_type,
-                            parent_action_emb=None,
-                            parent_h=None,
-                            parent_type_name=self.cur_item.parent_type_name,
-                            parent_field_name=self.cur_item.parent_field_name,
-                        ))
-                    else:
-                        # Next line exists for breakpoint
-                        unused_variable = None
                 for i in range(num_children):
                     self.queue = self.queue.append(TreeTraversal.QueueItem(
                         item_id=self.next_item_id,
@@ -1289,80 +1256,6 @@ class TreeTraversal:
                 else:
                     return None
 
-            elif self.cur_item.state == LIST_FINISHED:
-                stack_depth = self.cur_item.item_id
-                # We expect the stack to look like this:
-                # [..., ExecutiongActionList, ExecutingStep/InHole]
-                assert len(self.template_stack) == stack_depth + 2
-                assert isinstance(self.template_stack[stack_depth], TreeTraversal.ExecutingActionList)
-
-                # If there's a sequential hole in an action list, remove it
-                # XXX we shouldn't do this, for example if we have
-                # [[a, b], HoleValuePlaceholder(is_seq=True)]
-                # and we want to generate
-                # [[a, b], c]
-                # then after we generate [a, b], we have a LIST_FINISHED which will remove the HoleValuePlaceholder,
-                # preventing us from generating c.
-                action_list = self.template_stack[stack_depth]
-                if (action_list.queue and 
-                        isinstance(action_list.queue.left, ast_util.HoleValuePlaceholder) and
-                        action_list.queue.left.is_seq):
-                    self.template_stack = attr.evolve(
-                        self.template_stack,
-                        stack=self.template_stack.stack.set(
-                            stack_depth,
-                            attr.evolve(action_list, queue=action_list.queue.popleft())))
-
-                if self.pop(check_hole_finished=False):
-                    last_choice = None
-                    continue
-                else:
-                    return None
-            
-            elif self.cur_item.state == MISSING_FIELD:
-                stack_depth = self.cur_item.item_id
-                # We expect the stack to look like this:
-                # [..., ExecutiongActionList, ExecutingStep/InHole]
-                assert len(self.template_stack) == stack_depth + 2
-                assert isinstance(self.template_stack[stack_depth], TreeTraversal.ExecutingActionList)
-
-                # If there's...
-                # - a list length determination then a sequential hole,
-                # - or an optional hole
-                # then remove those
-                action_list = self.template_stack[stack_depth]
-                if action_list.queue:
-                    num_to_remove = 0
-                    first = action_list.queue.left
-                    if isinstance(first, ast_util.HoleValuePlaceholder) and first.is_opt:
-                        assert first.type == self.cur_item.field_type
-                        assert first.field_name == self.cur_item.parent_field_name
-                        num_to_remove = 1
-                    elif isinstance(first, tuple):
-                        second = action_list.queue[1]
-                        if isinstance(second, ast_util.HoleValuePlaceholder) and second.is_seq:
-                            for r in first:
-                                list_type, num_children = self.model.preproc.all_rules[r]
-                                list_elem_type = list_type[:-1]
-                                if list_elem_type != self.cur_item.node_type:
-                                    continue
-                            assert second.type == self.cur_item.field_type
-                            assert second.field_name == self.cur_item.parent_field_name
-                            num_to_remove = 2
-
-                    if num_to_remove:
-                        self.template_stack = attr.evolve(
-                            self.template_stack,
-                            stack=self.template_stack.stack.set(
-                                stack_depth,
-                                attr.evolve(action_list, queue=action_list.queue.popleft(num_to_remove))))
-
-                if self.pop(check_hole_finished=False):
-                    last_choice = None
-                    continue
-                else:
-                    return None
-
             else:
                 raise ValueError('Unknown state {}'.format(self.cur_item.state))
     
@@ -1414,33 +1307,41 @@ class TreeTraversal:
 
     def pop(self, check_hole_finished):
         if self.queue:
-            if (check_hole_finished and 
-                    not self.template_stack.empty and
-                    isinstance(self.template_stack.top, TreeTraversal.InHole) and 
-                    self.template_stack.top.item_id_to_finish == self.cur_item.item_id):
-                assert not self.template_stack.top.is_finished
-                self.template_stack = self.template_stack.evolve_top(is_finished=True)
+            if check_hole_finished and not self.template_stack.empty:
+                everything_finished = True
+                # Go over everything from top to bottom
+                for i in reversed(range(len(self.template_stack))):
+                    stack_entry = self.template_stack[i]
+                    if isinstance(stack_entry, TreeTraversal.InHole):
+                        if stack_entry.item_id_to_finish == self.cur_item.item_id:
+                            assert everything_finished
+                            self.template_stack = self.template_stack.evolve_i(i, is_finished=True)
+                        elif not stack_entry.is_finished:
+                            everything_finished = False
+                    elif isinstance(stack_entry, TreeTraversal.ExecutingActionList) and not stack_entry.action_provider.finished:
+                        everything_finished = False
             self.cur_item = self.queue[-1]
             self.queue = self.queue.delete(-1)
             return True
         return False
 
     def process_choices(self, choices):
-        should_return = True
-        if self.template_stack:
+        orig_stack = self.template_stack  # For debugging
+        while self.template_stack:
             top = self.template_stack.top
             if (isinstance(top, TreeTraversal.ExecutingStep)
+                or isinstance(top, TreeTraversal.ExecutingActionList) and top.action_provider.finished
                 or isinstance(top, TreeTraversal.InHole) and top.is_finished):
                 _, self.template_stack = self.template_stack.pop()
-                should_return = (
-                    not self.template_stack or
-                    not self.template_stack.top.queue)
+            else:
+                break
 
-        if not should_return:
+        should_continue = self.template_stack and isinstance(self.template_stack.top, TreeTraversal.ExecutingActionList)
+        if should_continue:
             self.template_stack = self.template_stack.evolve_top(
                     last_choices=choices)
 
-        return should_return, choices
+        return not should_continue, choices
 
     def rule_choice(self, node_type, rule_logits):
         raise NotImplementedError
