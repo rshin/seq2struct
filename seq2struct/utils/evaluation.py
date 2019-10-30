@@ -32,13 +32,12 @@ def compute_metrics(config_path, config_args, section, inferred_path,logdir=None
         return logdir, evaluate_default(data, inferred_lines)
 
 def load_from_lines(inferred_lines):
-    for line in tqdm.tqdm(inferred_lines):
+    for line in inferred_lines:
         infer_results = json.loads(line)
         if infer_results.get('beams', ()):
             inferred_code = infer_results['beams'][0]['inferred_code']
         else:
             inferred_code = None
-            assert 'error' in infer_results
         yield inferred_code, infer_results
 
 def evaluate_default(data, inferred_lines):
